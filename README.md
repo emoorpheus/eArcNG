@@ -422,6 +422,6 @@ eArcNG by [emoorpheus](https://github.com/emoorpheus). Built on:
   guard, the QML patch method for the system indicator (the `sed` replacements are reproduced, the code is our own).
 * [Nikolay1243/Webos-EARC-Volume-Overlay](https://github.com/Nikolay1243/Webos-EARC-Volume-Overlay): the
   original overlay app and its technique of a floating window without focus, which the eArcNG app uses.
-
+Developed with the help of AI assistants (Claude, Gemini, ChatGPT); tested by the author on a real TV (see Limitations).
 MIT license, see [LICENSE](LICENSE). Not affiliated with LG Electronics or Sony; LG, webOS and Sony are trademarks
 of their respective owners. Use root access to your TV at your own risk.
