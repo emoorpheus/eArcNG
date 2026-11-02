@@ -422,6 +422,7 @@ eArcNG, автор [emoorpheus](https://github.com/emoorpheus). Основан �
   метод QML-патча системного индикатора (`sed`-замены воспроизведены, код свой).
 * [Nikolay1243/Webos-EARC-Volume-Overlay](https://github.com/Nikolay1243/Webos-EARC-Volume-Overlay): исходное
   приложение-оверлей и его техника плавающего окна без фокуса, на которой построено приложение eArcNG.
+Разработано с помощью ИИ-ассистентов (Claude, Gemini, ChatGPT); проверено автором на реальном ТВ (см. «Ограничения»).
 
 Лицензия MIT, см. [LICENSE](LICENSE). Проект не связан с LG Electronics и Sony; LG, webOS и Sony — товарные знаки
 их владельцев. Используете root-доступ к ТВ на свой риск.
