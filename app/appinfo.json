@@ -1,0 +1,21 @@
+{
+  "id": "com.github.emoorpheus.earcng",
+  "version": "1.0.0",
+  "vendor": "emoorpheus",
+  "type": "web",
+  "main": "index.html",
+  "title": "eArcNG",
+  "appDescription": "Real eARC/ARC soundbar volume on the TV screen (HDMI-CEC).",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "visible": true,
+  "transparent": true,
+  "defaultWindowType": "card",
+  "handlesRelaunch": true,
+  "noSplashOnLaunch": true,
+  "spinnerOnLaunch": false,
+  "disableBackHistoryAPI": true,
+  "supportTouchMode": "none",
+  "requiredACG": [],
+  "resolution": "1920x1080"
+}

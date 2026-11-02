@@ -1,0 +1,51 @@
+#!/bin/sh
+# 95-cec-volume-bridge - webOS Homebrew Channel init.d hook (выполняется при загрузке, после 91-*).
+# Запускает cec_volume_bridge.py; штатный watcher.js (считает нажатия ТВ) останавливает.
+# Отключить: touch /home/root/cec-volume/disable     Параметры: /home/root/cec-volume/args
+# Режим: /home/root/cec-volume/ui = native -> QML-патч нативного индикатора (native-osd.sh) + --ui native
+set -u
+DIR=${CEC_DIR:-/home/root/cec-volume}
+RUNDIR=${RUNDIR:-/tmp}
+BRIDGE=$DIR/cec_volume_bridge.py
+PIDFILE=$RUNDIR/cec-volume-bridge.pid
+LOG=$RUNDIR/cec-volume-bridge.log
+ERR=$RUNDIR/cec-volume-bridge.err   # stderr: ошибки флагов в args, трейсбеки
+
+note() { echo "$(date '+%Y-%m-%d %H:%M:%S') hook: $*" >> "$LOG"; }
+
+[ -e "$DIR/disable" ] && exit 0
+[ -f "$BRIDGE" ] || exit 0
+PY=$(command -v python3 2>/dev/null) || { note "python3 not found - bridge not started"; exit 0; }
+
+# Штатный бэкенд оверлея (Node watcher.js) показывает счётчик нажатий ТВ - он не нужен
+for d in /proc/[0-9]*; do
+	cmd=$(tr '\0' ' ' 2>/dev/null < "$d/cmdline") || continue
+	case $cmd in
+		*node*earcvolume*/runtime/watcher.js*) kill "${d#/proc/}" 2>/dev/null && note "stopped stock watcher.js" ;;
+	esac
+done
+
+# Уже работает? (pid из файла жив и это наш процесс)
+if [ -f "$PIDFILE" ]; then
+	pid=$(cat "$PIDFILE" 2>/dev/null)
+	case $pid in
+		'' | *[!0-9]*) ;;
+		*) tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" | grep -q cec_volume_bridge && exit 0 ;;
+	esac
+fi
+
+ARGS=$(cat "$DIR/args" 2>/dev/null || true)
+if command -v setsid >/dev/null 2>&1; then RUN="setsid"; else RUN="nohup"; fi
+UI=
+if [ "$(cat "$DIR/ui" 2>/dev/null || true)" = native ]; then
+	UI="--ui native"
+	# патч ставится в фоне (перезапуск surface-manager ~15 с); до этого мост показывает оверлей
+	if [ -f "$DIR/native-osd.sh" ] && [ ! -e "$DIR/no-native" ] && [ "$(sh "$DIR/native-osd.sh" status)" = inactive ]; then
+		$RUN sh "$DIR/native-osd.sh" apply </dev/null >/dev/null 2>&1 &
+		note "native OSD patch is being applied"
+	fi
+fi
+# shellcheck disable=SC2086  # UI и ARGS намеренно разбиваются на отдельные флаги
+$RUN "$PY" "$BRIDGE" --pidfile "$PIDFILE" --log-file "$LOG" $UI $ARGS </dev/null >/dev/null 2>"$ERR" &
+note "started ($PY, args: ${UI:+$UI }${ARGS:-none})"
+exit 0

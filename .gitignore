@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+tests/out/
+.DS_Store
+*.zip
+earcng-report.txt
+*.log
+!tests/fixtures/*.log

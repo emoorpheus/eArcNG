@@ -1,0 +1,222 @@
+/* overlay.css - OSD громкости в стиле webOS (1920x1080).
+ * badge (по умолчанию): круг рядом с нативным индикатором ARC «+ / динамик / −» у правой кромки;
+ *   размеры/цвета - по присланному описанию StarfishVolume.qml (bgCircle 96px #373A41 @0.5, число #E6E5E5
+ *   с тенью #b3000000); с файлом прошивки не сверено.
+ * pill / ring: прежние варианты (токены LG Enact Sandstone).
+ * Всё, что может понадобиться подогнать под вашу прошивку, - в :root. */
+@font-face { font-family: "OSD Text"; font-weight: 400; src: local("LG Smart UI Regular"), local("LGSmartUI-Regular"), local("Museo Sans"); }
+@font-face { font-family: "OSD Text"; font-weight: 600; src: local("LG Smart UI SemiBold"), local("LGSmartUI-SemiBold"), local("Museo Sans"); }
+@font-face { font-family: "OSD Number"; font-weight: 600; src: local("LG Smart UI NUMBER SemiBold"), local("LGSmartUINUMBER-SemiBold"), local("LG Smart UI SemiBold"), local("LGSmartUI-SemiBold"); }
+
+:root {
+  --osd-top: 60px;                      /* отступы от края экрана */
+  --osd-side: 72px;
+  --osd-bottom: 96px;
+  --osd-center-side: 160px;             /* center-*: левее нативного индикатора ARC (141px от правой кромки) */
+  --osd-w: 472px;                       /* капсула (variant=pill) */
+  --osd-h: 84px;
+  --osd-radius: 42px;
+  --osd-bg: rgba(66, 71, 78, 0.94);     /* Sandstone popup #575e66, чуть темнее для видео */
+  --osd-border: rgba(255, 255, 255, 0.08);
+  --osd-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  --osd-text: #e6e6e6;                  /* Sandstone text */
+  --osd-sub: #abaeb3;                   /* Sandstone sub-text */
+  --osd-track: #2e3137;                 /* Sandstone progress bg #373a41, темнее на светлом фоне */
+  --osd-fill: #e6e6e6;                  /* Sandstone progress fill */
+  --osd-knob: #ffffff;
+  --osd-track-h: 6px;                   /* Sandstone 4K 12px -> 6px */
+  --osd-knob-size: 22px;
+  --osd-icon: 40px;
+  --osd-number: 46px;
+  --osd-ring: 200px;                    /* круг (variant=ring) */
+  --osd-anim: 160ms;
+  --osd-fade: 150ms;                    /* появление/исчезновение (натив: fadeAnimationDuration 150) */
+  --badge-size: 96px;                   /* variant=badge: bgCircleDiameter */
+  --badge-bg: rgba(55, 58, 65, 0.5);    /* bgCircleColor #373A41, bgCircleOpacity 0.5 */
+  --badge-number: 44px;
+  --badge-text: #e6e5e5;                /* numberFontColor */
+  --badge-text-shadow: 0 2.5px 8px rgba(0, 0, 0, 0.7);   /* numberShadow: #b3000000, radius 8, dy 2.5 */
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+body { font-family: "OSD Text", "LG Smart UI", "Helvetica Neue", Arial, sans-serif; color: var(--osd-text); }
+
+/* ---------- OSD ---------- */
+.osd {
+  display: none; position: absolute; width: var(--osd-w); height: var(--osd-h);
+  padding: 0 30px 0 26px; align-items: center;
+  border-radius: var(--osd-radius); background: var(--osd-bg);
+  border: 1px solid var(--osd-border); box-shadow: var(--osd-shadow);
+  opacity: 0; transition: opacity var(--osd-fade) ease;   /* как нативный: только прозрачность */
+}
+body.overlay-mode .osd { display: flex; }
+.osd.show { opacity: 1; }
+
+.osd[data-pos="top-right"] { top: var(--osd-top); right: var(--osd-side); transform-origin: top right; }
+.osd[data-pos="top-left"] { top: var(--osd-top); left: var(--osd-side); transform-origin: top left; }
+.osd[data-pos="top-center"] { top: var(--osd-top); left: 50%; margin-left: calc(var(--osd-w) / -2); transform-origin: top center; }
+.osd[data-pos="center-right"] { top: 50%; right: var(--osd-center-side); margin-top: calc(var(--osd-h) / -2); transform-origin: center right; }
+.osd[data-pos="center-left"] { top: 50%; left: var(--osd-center-side); margin-top: calc(var(--osd-h) / -2); transform-origin: center left; }
+.osd[data-pos="bottom-right"] { bottom: var(--osd-bottom); right: var(--osd-side); transform-origin: bottom right; }
+.osd[data-pos="bottom-left"] { bottom: var(--osd-bottom); left: var(--osd-side); transform-origin: bottom left; }
+.osd[data-pos="bottom-center"] { bottom: var(--osd-bottom); left: 50%; margin-left: calc(var(--osd-w) / -2); transform-origin: bottom center; }
+
+.osd-icon { flex: none; width: var(--osd-icon); height: var(--osd-icon); color: var(--osd-text); }
+.ico { display: block; width: 100%; height: 100%; }
+.ico-body { fill: currentColor; }
+.ico-wave { fill: none; stroke: currentColor; stroke-width: 3.2; stroke-linecap: round; }
+.ico-off { display: none; }
+.osd.is-muted .ico-on { display: none; }
+.osd.is-muted .ico-off { display: block; }
+
+.osd-track {
+  position: relative; flex: 1; height: var(--osd-track-h); margin: 0 20px 0 22px;
+  border-radius: calc(var(--osd-track-h) / 2); background: var(--osd-track);
+}
+.osd-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--level, 0) * 100%);
+  border-radius: inherit; background: var(--osd-fill); transition: width var(--osd-anim) ease-out;
+}
+.osd-knob {
+  position: absolute; top: 50%; left: calc(var(--level, 0) * 100%);
+  width: var(--osd-knob-size); height: var(--osd-knob-size);
+  margin: calc(var(--osd-knob-size) / -2) 0 0 calc(var(--osd-knob-size) / -2);
+  border-radius: 50%; background: var(--osd-knob); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: left var(--osd-anim) ease-out;
+}
+.osd-value {
+  flex: none; min-width: 3ch; text-align: right;            /* 0..100 без сдвига полосы */
+  font-family: "OSD Number", "OSD Text", "Helvetica Neue", Arial, sans-serif;
+  font-size: var(--osd-number); font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+}
+
+.osd.is-muted .osd-fill, .osd.is-muted .osd-knob { background: var(--osd-sub); opacity: 0.45; }
+.osd.is-muted .osd-value { color: var(--osd-sub); }
+.osd.is-bump .osd-value, .osd.is-bump .osd-knob { animation: osd-bump 300ms ease-out; }
+@keyframes osd-bump { 0% { transform: scale(1); } 35% { transform: scale(1.14); } 100% { transform: scale(1); } }
+
+/* ---------- variant=ring: круг с кольцевым индикатором ---------- */
+.osd-ring { display: none; }
+.osd[data-variant="ring"] { --osd-w: var(--osd-ring); --osd-h: var(--osd-ring); padding: 0; border-radius: 50%; }
+.osd[data-variant="ring"] .osd-track { display: none; }
+.osd[data-variant="ring"] .osd-ring {
+  display: block; position: absolute; left: 50%; top: 50%; width: 168px; height: 168px;
+  margin: -84px 0 0 -84px; transform: rotate(-90deg);
+}
+.ring-bg { fill: none; stroke: var(--osd-track); stroke-width: 8; }
+.ring-fill {
+  fill: none; stroke: var(--osd-fill); stroke-width: 8; stroke-linecap: round;
+  stroke-dasharray: 477.52px; stroke-dashoffset: calc(477.52px * (1 - var(--level, 0)));
+  transition: stroke-dashoffset var(--osd-anim) ease-out;
+}
+.osd.is-zero .ring-fill { opacity: 0; }
+.osd.is-muted .ring-fill { stroke: var(--osd-sub); opacity: 0.45; }
+.osd[data-variant="ring"] .osd-icon { position: absolute; left: 50%; top: 42px; width: 30px; height: 30px; margin-left: -15px; }
+.osd[data-variant="ring"] .osd-value {
+  position: absolute; left: 0; right: 0; top: 84px; min-width: 0; text-align: center; font-size: 60px;
+}
+
+/* ---------- variant=badge: круг с числом рядом с нативным «+ / динамик / −» ---------- */
+.osd[data-variant="badge"] {
+  --osd-w: var(--badge-size); --osd-h: var(--badge-size);
+  padding: 0; justify-content: center; border: 0; border-radius: 50%;
+  background: var(--badge-bg); box-shadow: none;
+}
+.osd[data-variant="badge"] .osd-track, .osd[data-variant="badge"] .osd-icon { display: none; }
+.osd[data-variant="badge"] .osd-value {
+  min-width: 0; text-align: center; font-size: var(--badge-number); color: var(--badge-text);
+  text-shadow: var(--badge-text-shadow); letter-spacing: -0.02em;
+}
+.osd[data-variant="badge"].is-muted .osd-value { display: none; }
+.osd[data-variant="badge"].is-muted .osd-icon {
+  display: block; width: 48px; height: 48px; color: var(--badge-text);
+  filter: drop-shadow(0 2.5px 6px rgba(0, 0, 0, 0.7));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .osd, .osd-fill, .osd-knob, .ring-fill { transition: none; }
+}
+
+/* ---------- экран настройки ----------
+ * Чистый чёрный фон (пиксели OLED выключены), тонкие линии, фокус - цветной контур, без ярких заливок. */
+.setup {
+  display: none; position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow: hidden;
+  --s-text: #d6d6d6; --s-sub: #7d8086; --s-dim: #55585d;
+  --s-track: #161616; --s-a: #5fdcae; --s-b: #3d9be0; --s-err: #e86666; --s-off: #3a3a3a;
+  --s-btn-text: #bdbdbd; --s-btn-border: #2c2c2c; --s-focus-text: #ffffff;
+  background: #000; color: var(--s-text);
+}
+body.setup-mode .setup { display: block; }
+.setup button { font-family: inherit; font-weight: 400; outline: none; cursor: pointer; }
+.setup-brand {
+  position: absolute; top: 64px; left: 0; right: 0; text-align: center;
+  color: var(--s-dim); font-size: 24px; font-weight: 600; letter-spacing: 0.18em;
+}
+.setup-center { position: absolute; top: 200px; left: 0; right: 0; text-align: center; }
+
+.hero { position: relative; width: 264px; height: 264px; margin: 0 auto 34px; }
+.hero-ring { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.hero-track, .hero-arc { fill: none; stroke-width: 7; }
+.hero-track { stroke: var(--s-track); }
+.hero-arc {
+  stroke-linecap: round; stroke-dasharray: 678.6; stroke-dashoffset: 0;
+  transition: stroke-dashoffset 420ms ease, opacity 300ms ease; transform-origin: 120px 120px;
+}
+.hero-stop-a { stop-color: var(--s-a); }
+.hero-stop-b { stop-color: var(--s-b); }
+.hero-icon {
+  position: absolute; top: 50%; left: 50%; width: 108px; height: 108px; margin: -54px 0 0 -58px;
+  color: var(--s-text); transition: opacity 200ms ease;
+}
+.hero-body { fill: currentColor; }
+.hero-wave { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+.hero-off { opacity: 0; }
+.hero[data-state="ok"] .hero-wave { animation: hero-wave 2.4s ease-in-out infinite; }
+.hero[data-state="ok"] .w2 { animation-delay: 0.35s; }
+.hero[data-state="off"] .hero-on, .hero[data-state="error"] .hero-on { opacity: 0; }
+.hero[data-state="off"] .hero-off, .hero[data-state="error"] .hero-off { opacity: 1; }
+.hero[data-state="off"] .hero-icon { color: var(--s-off); }
+.hero[data-state="off"] .hero-arc { opacity: 0; }
+.hero[data-state="error"] .hero-arc { stroke: var(--s-err); }
+.hero[data-state="error"] .hero-icon { color: var(--s-err); }
+.hero[data-state="busy"] .hero-arc { stroke-dashoffset: 509; animation: hero-spin 1.1s linear infinite; }
+.hero[data-state="busy"] .hero-on { opacity: 0.4; }
+@keyframes hero-spin { to { transform: rotate(360deg); } }
+@keyframes hero-wave { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.setup-status { font-size: 46px; font-weight: 400; line-height: 1.15; color: var(--s-text); }
+.setup-ui { min-height: 34px; margin-top: 8px; font-size: 24px; color: var(--s-sub); }
+.setup-buttons { display: flex; justify-content: center; margin-top: 46px; }
+.btn {
+  min-width: 250px; margin: 0 14px; padding: 20px 36px; border-radius: 999px;
+  border: 2px solid var(--s-btn-border); background: transparent; color: var(--s-btn-text); font-size: 28px;
+  transition: transform 120ms ease, background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.btn:focus { color: var(--s-focus-text); border-color: var(--s-a); transform: scale(1.06); }
+.btn[aria-disabled="true"] { opacity: 0.45; }
+.setup-note {
+  max-width: 1100px; max-height: 3.2em; margin: 30px auto 0; overflow: hidden;
+  color: var(--s-dim); font-size: 20px; line-height: 1.6;
+}
+.setup-modes { position: absolute; bottom: 128px; left: 0; right: 0; text-align: center; }
+.setup-modes[hidden] { display: none; }
+.setup-modes-label { margin-bottom: 14px; color: var(--s-dim); font-size: 20px; letter-spacing: 0.04em; }
+.mode {
+  min-width: 190px; margin: 0 8px; padding: 12px 30px; border-radius: 999px;
+  border: 2px solid #1e1e1e; background: transparent; color: var(--s-dim); font-size: 23px;
+  transition: transform 120ms ease, background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.mode[aria-pressed="true"] { background: #141414; border-color: #2c2c2c; color: var(--s-text); }
+.mode:focus { color: var(--s-focus-text); border-color: var(--s-a); transform: scale(1.06); }
+.mode.is-pending { border-color: var(--s-b); color: var(--s-focus-text); }
+.mode[aria-disabled="true"] { opacity: 0.45; }
+.setup-credit {
+  position: absolute; bottom: 60px; left: 0; right: 0; text-align: center;
+  color: var(--s-dim); font-size: 21px; letter-spacing: 0.04em;
+}
+.setup-credit b { color: var(--s-sub); font-weight: 400; }
+@media (prefers-reduced-motion: reduce) {
+  .hero-arc, .hero-wave { animation: none !important; transition: none; }
+}

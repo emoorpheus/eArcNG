@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Static BusyBox from busybox.net. Not Ubuntu's busybox-static: it runs its own applets
+      # (mount, umount) before PATH, so the test stubs would be ignored.
+      BUSYBOX_URL: https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox
+      BUSYBOX_SHA256: 6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install BusyBox and ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$RUNNER_TEMP/bin/busybox" "$BUSYBOX_URL"
+          echo "$BUSYBOX_SHA256  $RUNNER_TEMP/bin/busybox" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/busybox"
+          "$RUNNER_TEMP/bin/busybox" | head -n 1
+          echo "BUSYBOX=$RUNNER_TEMP/bin/busybox" >> "$GITHUB_ENV"
+
+      - name: Run all tests (no TV)
+        run: REQUIRE_ALL=1 bash tests/run-all.sh

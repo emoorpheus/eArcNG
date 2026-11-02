@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eArcNG</title>
+<link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+<main id="setup" class="setup">
+  <div class="setup-brand">eArcNG</div>
+  <div class="setup-center">
+    <div id="hero" class="hero" data-state="busy">
+      <svg class="hero-ring" viewBox="0 0 240 240">
+        <defs><linearGradient id="hero-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop class="hero-stop-a" offset="0"/><stop class="hero-stop-b" offset="1"/></linearGradient></defs>
+        <circle class="hero-track" cx="120" cy="120" r="108"/>
+        <circle class="hero-arc" cx="120" cy="120" r="108" stroke="url(#hero-grad)"/>
+      </svg>
+      <svg class="hero-icon hero-on" viewBox="0 0 48 48"><path class="hero-body" d="M7 18.5h8.5L26 10v28l-10.5-8.5H7z"/><path class="hero-wave w1" d="M31.5 18a8.5 8.5 0 0 1 0 12"/><path class="hero-wave w2" d="M35.8 13.6a14.5 14.5 0 0 1 0 20.8"/></svg>
+      <svg class="hero-icon hero-off" viewBox="0 0 48 48"><path class="hero-body" d="M7 18.5h8.5L26 10v28l-10.5-8.5H7z"/><path class="hero-wave" d="M32 19l9 10M41 19l-9 10"/></svg>
+    </div>
+    <div id="status" class="setup-status">Checking…</div>
+    <div id="ui" class="setup-ui"></div>
+    <div class="setup-buttons">
+      <button id="toggle" class="btn">Enable</button>
+      <button id="test" class="btn">Test</button>
+    </div>
+    <p id="details" class="setup-note"></p>
+  </div>
+  <div id="modes" class="setup-modes" hidden>
+    <div id="modes-label" class="setup-modes-label">Volume indicator</div>
+    <button id="ui-native" class="mode" aria-pressed="false">System</button><button id="ui-overlay" class="mode" aria-pressed="false">Overlay</button>
+  </div>
+  <div class="setup-credit">github.com/<b>emoorpheus</b>/earcng · 1.0.0</div>
+</main>
+
+<div id="osd" class="osd" data-variant="badge" data-pos="center-right" aria-hidden="true">
+  <div class="osd-icon">
+    <svg class="ico ico-on" viewBox="0 0 48 48"><path class="ico-body" d="M7 18.5h8.5L26 10v28l-10.5-8.5H7z"/><path class="ico-wave" d="M31.5 18a8.5 8.5 0 0 1 0 12M35.8 13.6a14.5 14.5 0 0 1 0 20.8"/></svg>
+    <svg class="ico ico-off" viewBox="0 0 48 48"><path class="ico-body" d="M7 18.5h8.5L26 10v28l-10.5-8.5H7z"/><path class="ico-wave" d="M32 19l9 10M41 19l-9 10"/></svg>
+  </div>
+  <div class="osd-track"><div class="osd-fill"></div><div class="osd-knob"></div></div>
+  <svg class="osd-ring" viewBox="0 0 168 168"><circle class="ring-bg" cx="84" cy="84" r="76"/><circle class="ring-fill" cx="84" cy="84" r="76"/></svg>
+  <div id="osd-value" class="osd-value">0</div>
+</div>
+
+<script src="overlay.js"></script>
+</body>
+</html>

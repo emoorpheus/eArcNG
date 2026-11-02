@@ -1,0 +1,64 @@
+name: "Report: works / does not work · Отчёт: работает / не работает"
+description: "Your TV, soundbar and the output of earcng.sh report · Ваш ТВ, саундбар и вывод earcng.sh report"
+title: "[report] TV model + soundbar"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you! Every report helps to know where eArcNG works. Run on your computer:
+        Спасибо! Каждый отчёт помогает понять, где eArcNG работает. Выполните на компьютере:
+
+        ```
+        ./tools/earcng.sh root@<TV-IP> report
+        ```
+
+        It saves `earcng-report.txt` (on macOS it is also copied to the clipboard). The report has the TV model,
+        firmware, CEC and QML checks, status and the bridge log; it does not contain the TV address.
+        Команда сохранит `earcng-report.txt` (на macOS ещё и скопирует в буфер обмена). В отчёте модель ТВ,
+        прошивка, проверки CEC и QML, статус и лог моста; адреса ТВ в нём нет.
+  - type: dropdown
+    id: result
+    attributes:
+      label: "Result · Результат"
+      options:
+        - "Works · Работает"
+        - "Partly works · Работает частично"
+        - "Does not work · Не работает"
+    validations:
+      required: true
+  - type: input
+    id: tv
+    attributes:
+      label: "TV model and webOS version · Модель ТВ и версия webOS"
+      placeholder: "LG OLED65M59LA, webOS 10.3.0"
+    validations:
+      required: true
+  - type: input
+    id: soundbar
+    attributes:
+      label: "Soundbar or receiver, connection · Саундбар или ресивер, подключение"
+      placeholder: "Sony HT-A8000, HDMI eARC"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: "Mode · Режим"
+      options:
+        - "System indicator (ui native) · Системный индикатор"
+        - "Overlay (ui overlay) · Оверлей"
+        - "Not installed / install failed · Не установлено / установка не удалась"
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: "What happens · Что происходит"
+      description: "What works, what does not, how to reproduce · Что работает, что нет, как повторить"
+  - type: textarea
+    id: report
+    attributes:
+      label: "Report · Отчёт (earcng.sh … report)"
+      render: text
+    validations:
+      required: true
