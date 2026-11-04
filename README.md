@@ -158,6 +158,7 @@ app/                           the eArcNG app: appinfo.json, icons, index.html|o
 tools/earcng.sh                from a PC over SSH (Bash 3.2+, i.e. macOS's stock bash too)
 tools/make-release.py          release files: IPK, Homebrew Channel manifest, zip, SHA256SUMS (maintainer)
 repo.json                      Homebrew Channel repository (points to the manifest of the latest release)
+docs/hb-description.html       Homebrew Channel package page: description (EN + RU) and pictures
 tests/                         tests without a TV (run-all.sh), TV telemetry, QML fixtures, luna-send stub, previews
 .github/ISSUE_TEMPLATE/        issue form for compatibility reports (the output of `report`)
 ```
@@ -450,7 +451,8 @@ is built with `FEATURE_PREFER_APPLETS` and is rejected by `tests/test_shell.sh`.
   `data.tar.gz`, `packageinfo.json`, the same bytes on every build, hidden files skipped, `same`, `backend/` inside.
 * `tests/test_release.py`: `tools/make-release.py` in a temporary git repository: the IPK and the zip come from
   the tag, the manifest (hash, size, URLs), `SHA256SUMS`, refusals (versions, tag, CHANGELOG, release notes),
-  a test repository (`--base-url`); `repo.json` matches.
+  a test repository (`--base-url`); `repo.json` matches; the package page (`docs/hb-description.html`) starts
+  with `<p>`, its pictures are files in the repository.
 * EIM and Homebrew Channel (1.1.0): `tests/test_bridge.py` (the `getArcVolume` reply, polling rates, `auto` / `cec`
   / `eim`, mute, the same value after a key press, `Unavailable`, `--probe`, the log not repeating `launch
   rejected`), `tests/test_shell.sh` (the app package alone: `status` offers Install / Update, `activate`, a

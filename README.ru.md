@@ -157,6 +157,7 @@ app/                           приложение eArcNG: appinfo.json, зна
 tools/earcng.sh                с ПК по SSH (Bash 3.2+, т.е. и штатный bash в macOS)
 tools/make-release.py          файлы релиза: IPK, манифест Homebrew Channel, zip, SHA256SUMS (для автора)
 repo.json                      репозиторий Homebrew Channel (указывает на манифест последнего релиза)
+docs/hb-description.html       страница пакета в Homebrew Channel: описание (EN + RU) и картинки
 tests/                         тесты без ТВ (run-all.sh), телеметрия с ТВ, QML-фикстуры, заглушка luna-send, превью
 .github/ISSUE_TEMPLATE/        форма issue для отчётов о совместимости (вывод `report`)
 ```
@@ -447,7 +448,8 @@ NODE_PATH=/path/to/node_modules node tests/render-preview.cjs   # необяза
   `packageinfo.json`, одинаковые байты при каждой сборке, скрытые файлы пропускаются, `same`, `backend/` внутри.
 * `tests/test_release.py`: `tools/make-release.py` во временном git-репозитории: IPK и zip — из тега, манифест
   (хеш, размер, адреса), `SHA256SUMS`, отказы (версии, тег, CHANGELOG, release notes), тестовый репозиторий
-  (`--base-url`); `repo.json` совпадает.
+  (`--base-url`); `repo.json` совпадает; страница пакета (`docs/hb-description.html`) начинается с `<p>`, её
+  картинки — файлы репозитория.
 * EIM и Homebrew Channel (1.1.0): `tests/test_bridge.py` (ответ `getArcVolume`, частота опроса, `auto` / `cec` /
   `eim`, mute, то же значение после нажатия, `Unavailable`, `--probe`, лог без повторов `launch rejected`),
   `tests/test_shell.sh` (только пакет приложения: `status` предлагает «Установить» / «Обновить», `activate`,

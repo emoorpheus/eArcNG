@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ APP_ID = "com.github.emoorpheus.earcng"
 IPK_NAME = APP_ID + "_%s_all.ipk"
 MANIFEST = APP_ID + ".manifest.json"
 REPO = "https://github.com/emoorpheus/earcng"
+RAW = "https://raw.githubusercontent.com/emoorpheus/earcng/main"
 ICON = "https://raw.githubusercontent.com/emoorpheus/earcng/main/app/largeIcon.png"
 GIT = ("git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
        "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main")
@@ -207,6 +209,32 @@ class Release(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(out)), sorted([IPK_NAME % self.v, MANIFEST, "SHA256SUMS"]),
                          "repo.json тестового репозитория удалён")
         self.assertEqual(self.manifest(out)["ipkUrl"], "%s/releases/download/v%s/%s" % (REPO, self.v, IPK_NAME % self.v))
+
+
+class HomebrewDescription(unittest.TestCase):
+    """Страница пакета в Homebrew Channel: fullDescriptionUrl из repo.json - файл в main."""
+
+    def repo_file(self, url):
+        self.assertTrue(url.startswith(RAW + "/"), url)
+        return os.path.join(ROOT, *url[len(RAW) + 1:].split("/"))
+
+    def test_full_description(self):
+        with open(os.path.join(ROOT, "repo.json")) as f:
+            pkg = json.load(f)["packages"][0]
+        with open(self.repo_file(pkg["fullDescriptionUrl"]), encoding="utf-8") as f:
+            html = f.read()
+        # Homebrew Channel 0.7.3 на OLED65M59LA показал пустое описание при shortDescription без <p> (в его CSS
+        # .rich-description{margin-top:-1em}); описания webosbrew начинаются с <p>.
+        self.assertTrue(html.startswith("<p>"), html[:40])
+        for tag in ("script", "style", "form", "input", "button", "iframe"):      # санитайзер HB их вырезает
+            self.assertNotIn("<" + tag, html.lower())
+        imgs = re.findall(r'<img src="([^"]+)"', html)
+        self.assertEqual(len(imgs), html.count("<img"))
+        self.assertGreaterEqual(len(imgs), 1)
+        for src in imgs:                       # относительный адрес HB разрешил бы от своей страницы, не от main
+            self.assertTrue(os.path.isfile(self.repo_file(src)), src)
+        self.assertIn("Экран настроек", html)                                      # EN + RU
+        self.assertIn("Settings screen", html)
 
 
 if __name__ == "__main__":

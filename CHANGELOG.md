@@ -2,6 +2,13 @@
 
 All notable changes to eArcNG.
 
+## [Unreleased]
+
+### Added
+- Homebrew Channel package page: a description (EN + RU) with three pictures from `docs/` (settings screen, badge,
+  pill and ring): `docs/hb-description.html`, `fullDescriptionUrl` in `repo.json`. Before, Homebrew Channel 0.7.3
+  on OLED65M59LA showed an empty description (the `shortDescription` text was not visible).
+
 ## [1.1.0] - 2026-11-04
 
 Checked on one TV (LG OLED65M59LA, webOS 10.3.0, Homebrew Channel 0.7.3) + Sony HT-A8000 over SSH; volume steps

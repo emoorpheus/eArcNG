@@ -25,6 +25,7 @@ Nikolay1243/Webos-EARC-Volume-Overlay (MIT): keep their copyright lines in [LICE
 | `tools/earcng.sh` | PC (macOS, Linux, WSL) | Bash 3.2+ (macOS stock bash): no `mapfile`, `${var,,}`, associative arrays |
 | `tools/make-release.py` | PC (maintainer) | Python 3.6+ stdlib; release files in `dist/` (see Release) |
 | `repo.json` | Homebrew Channel | repository: `manifestUrl` = `releases/latest/download/<id>.manifest.json`, not edited per release |
+| `docs/hb-description.html` | Homebrew Channel | package page (`fullDescriptionUrl`): HTML that starts with `<p>`, pictures by absolute `raw.githubusercontent.com/…/main/` URLs, no script/style/form/input/button (sanitized away) |
 | `tests/` | PC, CI | see below |
 
 On the TV: `/home/root/cec-volume/` (backend, `args`, `ui`), hook `/var/lib/webosbrew/init.d/95-cec-volume-bridge`,
@@ -88,6 +89,9 @@ BUSYBOX=/path/to/busybox BASH32=/path/to/bash-3.2 REQUIRE_ALL=1 bash tests/run-a
 * Claim only what was actually run: say which tests passed, and what still needs a check on the TV.
 
 ## Release
+
+Versions: documentation and small fixes bump the patch number (1.1.0 → 1.1.1), substantial changes the minor one
+(1.1.x → 1.2.0).
 
 Only after the TV checks: `## [Unreleased]` in `CHANGELOG.md` becomes `## [X.Y.Z] - date`, the "Tested" part of
 `docs/release-notes/vX.Y.Z.md` is filled in from the field test.

@@ -29,6 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = "https://github.com/emoorpheus/earcng"
 RAW = "https://raw.githubusercontent.com/emoorpheus/earcng/main"
 ICON_URI = RAW + "/app/largeIcon.png"
+DESCRIPTION_URI = RAW + "/docs/hb-description.html"  # Homebrew Channel package page (fullDescriptionUrl)
 
 
 class Fail(Exception):
@@ -168,6 +169,7 @@ def repo_json(info, manifest_url):
             "iconUri": ICON_URI,
             "manifestUrl": manifest_url,
             "shortDescription": info.get("appDescription", info["title"]),
+            "fullDescriptionUrl": DESCRIPTION_URI,
         }],
     }
 
