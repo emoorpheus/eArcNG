@@ -243,7 +243,8 @@ Re-running `install` updates the files and the app; `args` and the `ui` mode are
 The way without a PC. Checked on one TV (OLED65M59LA, webOS 10.3.0, Homebrew Channel 0.7.3) with a test
 repository on the local network: the list with the icon, the details page, INSTALL, **Install** on the settings
 screen (the bridge was running within ~3 s), **Update** after a test 1.1.1 package. The address in step 1 takes
-the manifest from the latest release (1.1.0 and later); with this address it has not been checked on a TV yet.
+the manifest from the latest release (1.1.0 and later); with it Homebrew Channel showed eArcNG in the list and the
+package page with the description (checked on the TV); installing and updating from it not yet.
 
 1. Homebrew Channel → Settings → add the repository
    `https://raw.githubusercontent.com/emoorpheus/earcng/main/repo.json` (the extra repositories field).
@@ -482,8 +483,11 @@ CI (`.github/workflows/tests.yml`) runs `tests/run-all.sh` with `REQUIRE_ALL=1` 
 * 1.1.0 has been checked on one TV (OLED65M59LA, 10.3.0, Homebrew Channel 0.7.3) over SSH, without a remote: the
   EIM source (`eim`, and `auto` without the CEC device: the value 0.18–0.4 s after a step; in a fast series values
   in between may be skipped, the last one is right), installing from Homebrew Channel with a test repository,
-  Install / Update on the settings screen. Not yet: the repository address from `main`, the
-  hints for Homebrew Channel errors, mute with `eim`, `auto` when the bus works but the soundbar is silent.
+  Install / Update on the settings screen. Not yet: the hints for Homebrew Channel errors, mute with `eim`, `auto`
+  when the bus works but the soundbar is silent.
+* 1.1.1 (documentation): with the address from `main` Homebrew Channel 0.7.3 showed eArcNG in the list and the
+  package page with the description and the three pictures; after two restarts of the TV the hook started 1.1.0
+  (36–39 s after boot, the native indicator patch active). Not yet: installing and updating from this address.
 * The eArcNG app (install with `appInstallService`, the icon in the app list, `uninstall` and a fresh install),
   the settings screen and the indicator choice on it (switching both ways,
   confirmation, cancel, the screen reopening with the result) have been checked on one TV (OLED65M59LA, 10.3.0, with

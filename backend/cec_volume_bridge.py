@@ -38,7 +38,7 @@ import sys
 import threading
 import time
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 DEFAULT_APP_ID = "com.github.emoorpheus.earcng"
 STATE_DIR = "/home/root/cec-volume"
 AUDIO_GET_VOLUME = "luna://com.webos.service.audio/master/getVolume"

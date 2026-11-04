@@ -2,7 +2,17 @@
 
 All notable changes to eArcNG.
 
-## [Unreleased]
+## [1.1.1] - 2026-11-04
+
+Documentation only: the bridge and the app work as in 1.1.0. Checked on one TV (LG OLED65M59LA, webOS 10.3.0,
+Homebrew Channel 0.7.3):
+- The repository address from `main` in Homebrew Channel: eArcNG in the list with its icon, the package page with
+  the description (EN + RU) and the three pictures, scrolled to the end.
+- 1.1.0 after two restarts of the TV: the hook started the bridge 36–39 s after boot, the native indicator patch
+  was active, no errors in the bridge log.
+
+Not checked on a TV yet: installing and updating from the `main` address, standby, the hints for Homebrew Channel
+errors, mute with `eim`, `auto` when the bus works but the soundbar does not answer, webOS 11.
 
 ### Added
 - Homebrew Channel package page: a description (EN + RU) with three pictures from `docs/` (settings screen, badge,
@@ -108,4 +118,6 @@ the settings screen with the screen reopening, all settings screen buttons, `rep
   and an issue form for it.
 - Tests without a TV (Python, Node, BusyBox ash, ssh stub, Bash 3.2, shellcheck), run in CI.
 
+[1.1.1]: https://github.com/emoorpheus/earcng/releases/tag/v1.1.1
+[1.1.0]: https://github.com/emoorpheus/earcng/releases/tag/v1.1.0
 [1.0.0]: https://github.com/emoorpheus/earcng/releases/tag/v1.0.0
