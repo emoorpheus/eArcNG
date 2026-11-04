@@ -4,6 +4,15 @@ All notable changes to eArcNG.
 
 ## [Unreleased]
 
+Checked on the same TV after the 1.1.2 release (key events over SSH): UPDATE 1.1.1 → 1.1.2 in Homebrew Channel
+from the `main` address, then Update on the settings screen: the bridge 1.1.2 started 0.7 s after 1.1.1 stopped,
+the native indicator patch stayed active, no errors; the volume keys then showed 21 / 20 in the system indicator.
+Before that the TV was switched on from off with the remote (power state Init → Active): the hook started 1.1.1
+about 34 s after boot, the patch was active.
+
+### Changed
+- README, AGENTS, the Homebrew Channel page: what NG in the name stands for (Next-Gen).
+
 ## [1.1.2] - 2026-11-04
 
 Documentation only: the bridge and the app work as in 1.1.0. Checked on one TV (LG OLED65M59LA, webOS 10.3.0,

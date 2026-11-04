@@ -5,7 +5,7 @@ Human documentation is in [README.md](README.md) / [README.ru.md](README.ru.md).
 
 ## Project
 
-eArcNG shows the real eARC/ARC soundbar volume on rooted LG webOS TVs, taken from HDMI-CEC
+eArcNG (NG: Next-Gen) shows the real eARC/ARC soundbar volume on rooted LG webOS TVs, taken from HDMI-CEC
 (`50:7A:xx` <Report Audio Status>). Two display modes:
 
 * `ui native` (webOS ≤ 10.x with QML): a QML patch makes the system LG indicator show the soundbar's number;

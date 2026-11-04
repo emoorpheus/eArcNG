@@ -2,7 +2,7 @@
 
 **English** · [Русский](README.ru.md)
 
-Combines two MIT-licensed projects:
+eArcNG (NG: Next-Gen) combines two MIT-licensed projects:
 
 * [trk501/lg-soundbar-volume-osd](https://github.com/trk501/lg-soundbar-volume-osd): the CEC logic
   (`50:7A:xx` <Report Audio Status>, fast-tap guard via `05:45`) and the **QML patch of the system volume
@@ -499,8 +499,9 @@ CI (`.github/workflows/tests.yml`) runs `tests/run-all.sh` with `REQUIRE_ALL=1` 
   13–21 ms after the key, the TV value was not touched, the LG mute icon was shown; while the TV screen saver is
   on, the first press only wakes the screen); standby (the power key → Active Standby, the bridge kept running;
   after Wake-on-LAN over Wi-Fi the system indicator showed the right values). The other Homebrew Channel error
-  hints have not been seen on a TV. Not yet: `auto` when the bus works but the soundbar is silent (it needs a
-  soundbar that does not answer), webOS 11, other TVs.
+  hints have not been seen on a TV. After the release: UPDATE 1.1.1 → 1.1.2, then Update on the settings screen
+  (the bridge 1.1.2 started 0.7 s after the old one stopped, the patch stayed active). Not yet: `auto` when the
+  bus works but the soundbar is silent (it needs a soundbar that does not answer), webOS 11, other TVs.
 * The eArcNG app (install with `appInstallService`, the icon in the app list, `uninstall` and a fresh install),
   the settings screen and the indicator choice on it (switching both ways,
   confirmation, cancel, the screen reopening with the result) have been checked on one TV (OLED65M59LA, 10.3.0, with
