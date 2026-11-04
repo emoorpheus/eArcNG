@@ -2,6 +2,19 @@
 
 All notable changes to eArcNG.
 
+## [Unreleased]
+
+Checked on one TV after the 1.1.1 release (LG OLED65M59LA, webOS 10.3.0, Homebrew Channel 0.7.3; the buttons were
+pressed with key events over SSH, not with a remote): updating from the `main` address. The package page showed
+`1.1.1 (installed: 1.1.0)`; UPDATE → "Application installed: eArcNG"; the settings screen offered Update (backend
+1.1.1 in the app, 1.1.0 installed) and after it showed the bridge running, without the hint. The bridge log: 1.1.0
+stopped, 1.1.1 started 1.2 s later, the native indicator patch stayed active, no errors; the TV did not restart.
+
+Not checked on a TV yet: a fresh install from the `main` address.
+
+### Changed
+- README, AGENTS: updating from the `main` address is marked as checked.
+
 ## [1.1.1] - 2026-11-04
 
 Documentation only: the bridge and the app work as in 1.1.0. Checked on one TV (LG OLED65M59LA, webOS 10.3.0,
@@ -118,6 +131,7 @@ the settings screen with the screen reopening, all settings screen buttons, `rep
   and an issue form for it.
 - Tests without a TV (Python, Node, BusyBox ash, ssh stub, Bash 3.2, shellcheck), run in CI.
 
+[Unreleased]: https://github.com/emoorpheus/earcng/compare/v1.1.1...HEAD
 [1.1.1]: https://github.com/emoorpheus/earcng/releases/tag/v1.1.1
 [1.1.0]: https://github.com/emoorpheus/earcng/releases/tag/v1.1.0
 [1.0.0]: https://github.com/emoorpheus/earcng/releases/tag/v1.0.0

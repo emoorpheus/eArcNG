@@ -244,7 +244,8 @@ The way without a PC. Checked on one TV (OLED65M59LA, webOS 10.3.0, Homebrew Cha
 repository on the local network: the list with the icon, the details page, INSTALL, **Install** on the settings
 screen (the bridge was running within ~3 s), **Update** after a test 1.1.1 package. The address in step 1 takes
 the manifest from the latest release (1.1.0 and later); with it Homebrew Channel showed eArcNG in the list and the
-package page with the description (checked on the TV); installing and updating from it not yet.
+package page with the description, and updating from 1.1.0 to 1.1.1 worked (UPDATE, then **Update** on the settings
+screen; checked on the TV); a fresh install from it not yet.
 
 1. Homebrew Channel → Settings → add the repository
    `https://raw.githubusercontent.com/emoorpheus/earcng/main/repo.json` (the extra repositories field).
@@ -487,7 +488,10 @@ CI (`.github/workflows/tests.yml`) runs `tests/run-all.sh` with `REQUIRE_ALL=1` 
   when the bus works but the soundbar is silent.
 * 1.1.1 (documentation): with the address from `main` Homebrew Channel 0.7.3 showed eArcNG in the list and the
   package page with the description and the three pictures; after two restarts of the TV the hook started 1.1.0
-  (36–39 s after boot, the native indicator patch active). Not yet: installing and updating from this address.
+  (36–39 s after boot, the native indicator patch active). After the release, updating from this address: UPDATE
+  1.1.0 → 1.1.1 in Homebrew Channel, then Update on the settings screen (the bridge 1.1.1 started 1.2 s after the
+  old one stopped, the native indicator patch stayed active, the TV did not restart). Not yet: a fresh install from
+  this address.
 * The eArcNG app (install with `appInstallService`, the icon in the app list, `uninstall` and a fresh install),
   the settings screen and the indicator choice on it (switching both ways,
   confirmation, cancel, the screen reopening with the result) have been checked on one TV (OLED65M59LA, 10.3.0, with

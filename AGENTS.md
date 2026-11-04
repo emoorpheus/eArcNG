@@ -33,10 +33,11 @@ app `/media/developer/apps/usr/palm/applications/com.github.emoorpheus.earcng`, 
 `/tmp/cec-volume-bridge.log` (+ `.err`), `/tmp/cec-volume-ui.log` (switch from the settings screen),
 `/tmp/earcng-install.log` (app install).
 
-Homebrew Channel install (1.1.0, checked on the TV with a test repository; with the address from `main` the list
-and the package page, installing from it not yet): the app package carries `backend/` (files 0644, run with
-`sh`); the settings screen runs `<app>/backend/remote-setup.sh activate` as root through Homebrew Channel. Both
-the PC `install` and Homebrew Channel install the same package (`ipk.py build <app> <out> <backend>`).
+Homebrew Channel install (1.1.0, checked on the TV with a test repository; with the address from `main` the list,
+the package page and updating 1.1.0 → 1.1.1, a fresh install from it not yet): the app package carries `backend/`
+(files 0644, run with `sh`); the settings screen runs `<app>/backend/remote-setup.sh activate` as root through
+Homebrew Channel. Both the PC `install` and Homebrew Channel install the same package
+(`ipk.py build <app> <out> <backend>`).
 
 ## Tests
 
