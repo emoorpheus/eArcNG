@@ -10,7 +10,14 @@ pressed with key events over SSH, not with a remote): updating from the `main` a
 1.1.1 in the app, 1.1.0 installed) and after it showed the bridge running, without the hint. The bridge log: 1.1.0
 stopped, 1.1.1 started 1.2 s later, the native indicator patch stayed active, no errors; the TV did not restart.
 
+The system indicator picture: a screenshot on the same TV during one volume step up and back through the TV's
+audio service (the soundbar reported 1, then 0 again).
+
 Not checked on a TV yet: a fresh install from the `main` address.
+
+### Added
+- A screenshot of the system indicator from the TV (`docs/native.jpg`: the LG indicator shows the soundbar's volume
+  over the settings screen) on the Homebrew Channel package page and in the README.
 
 ### Changed
 - README, AGENTS: updating from the `main` address is marked as checked.

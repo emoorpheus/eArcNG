@@ -59,6 +59,8 @@ right on key press, with native timings.
 * **`report`**: one command collects everything a GitHub issue needs (model, firmware, check, status, log; no TV
   address), and there is an issue form for it (see [Report a problem](#report-a-problem)).
 
+![System indicator (ui native): the LG indicator shows the soundbar's volume (here 1) over the eArcNG settings screen; a screenshot from OLED65M59LA](docs/native.jpg)
+
 ![badge: 22, 100 on a light background, mute; right: mock-up of the native ARC column](docs/badge.jpg)
 
 ## Why native is faster and more accurate
