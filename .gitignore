@@ -6,3 +6,4 @@ tests/out/
 earcng-report.txt
 *.log
 !tests/fixtures/*.log
+dist/

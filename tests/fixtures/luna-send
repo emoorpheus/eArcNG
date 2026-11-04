@@ -2,6 +2,7 @@
 # Заглушка luna-send для тестов на ПК (tests/test_shell.sh, tests/test_installer.sh).
 #   Все вызовы - в $FAKE_LUNA_LOG. Как на OLED65M59LA (10.3.0): stdin не /dev/null или терминал (канал ssh)
 #   -> ничего не выводит.  FAKE_INSTALL: ok (по умолчанию) | silent (без вывода) | fail | hang
+#   FAKE_ARC_FILE: файл с числом -> eim/getArcVolume отвечает {"Volume":N}; без файла - "Unknown method"
 [ -n "${FAKE_LUNA_LOG:-}" ] && echo "$*" >> "$FAKE_LUNA_LOG"
 [ -c /dev/stdin ] || exec >/dev/null
 for a in "$@"; do payload=$a; done
@@ -16,6 +17,12 @@ case "$*" in
 	*getVolume*)   # громкость ТВ 17, без mute (как отвечает audio service); с subscribe - подписка
 		echo '{"returnValue":true,"volumeStatus":{"soundOutput":"external_arc","volume":17,"muteStatus":false}}'
 		case $payload in *'"subscribe":true'*) while :; do sleep 1; done ;; esac ;;
+	*eim/getArcVolume*)   # OLED65M59LA (10.3.0) отвечает {"Volume":10}, без returnValue
+		if [ -n "${FAKE_ARC_FILE:-}" ] && [ -s "$FAKE_ARC_FILE" ]; then
+			echo "{\"Volume\":$(cat "$FAKE_ARC_FILE")}"
+		else
+			echo '{"returnValue":false,"errorCode":-1,"errorText":"Unknown method \"getArcVolume\" for category \"/\""}'
+		fi ;;
 	*getSystemInfo*)
 		echo '{"returnValue":true,"modelName":"OLED55C46LA","firmwareVersion":"33.21.65","sdkVersion":"9.2.0"}' ;;
 	*appInstallService/dev/install*)

@@ -122,6 +122,17 @@ touch "$HOOKDIR/60-volume-osd"
 if out=$($RS install "$T/stage" 2>&1); then rc=0; else rc=$?; fi
 check "active trk501 refused" test "$rc" != 0
 check "refusal names trk501" grep -q 'trk501 lg-soundbar-volume-osd is enabled' <<<"$out"
+rm -f "$HOOKDIR/60-volume-osd"
+echo 'import time; time.sleep(60)' > "$TRK_DIR/cec-sync.py"   # trk501 запущен вручную, без хука
+python3 "$TRK_DIR/cec-sync.py" </dev/null >/dev/null 2>&1 &
+TRKPID=$!
+wait_for nprocs "$TRK_DIR/cec-sync.py" 1
+if out=$($RS install "$T/stage" 2>&1); then rc=0; else rc=$?; fi
+check "running trk501 (no hook) refused" test "$rc" != 0 -a -n "$(grep 'trk501 lg-soundbar-volume-osd is running' <<<"$out")"
+check "  ... nothing installed" nothing_installed
+kill "$TRKPID" 2>/dev/null || true
+wait "$TRKPID" 2>/dev/null || true
+touch "$HOOKDIR/60-volume-osd"                     # дальше: хук есть, процесса нет -> 'enabled' (поиск не находит сам себя)
 
 echo "== install"
 : > "$FAKE_LUNA_LOG"
@@ -132,7 +143,9 @@ while IFS= read -r line; do echo "     | $line"; done <<<"$out"
 check "status after install = running" grep -qx running <<<"$out"
 check "app: IPK installed via appInstallService (as ares-install)" \
 	grep -qF "luna://com.webos.appInstallService/dev/install {\"id\":\"com.ares.defaultName\",\"ipkUrl\":\"$RUNDIR/earcng.ipk\",\"subscribe\":true}" "$FAKE_LUNA_LOG"
-check "  ... app files = app/" diff -r "$ROOT/app" "$APP"
+check "  ... app files = app/ + backend/ (for Install/Update on the settings screen)" \
+	python3 "$ROOT/backend/ipk.py" same "$ROOT/app" "$APP" "$ROOT/backend"
+check "  ... no __pycache__ in the package" test ! -e "$APP/backend/__pycache__"
 check "  ... confirmed" grep -qxF "app: eArcNG $VER installed ($APP)" <<<"$out"
 check "  ... package removed, luna-send stopped" test ! -e "$RUNDIR/earcng.ipk" -a "$(procs appInstallService/dev/install)" = 0
 check "  ... status: app line" grep -qxF "app: eArcNG $VER ($APP)" <<<"$out"
@@ -166,9 +179,13 @@ printf '%s\n' "2026-11-01T20:00:09.000000Z [CECMSG] TM4 RX507A1E" >> "$T/var/log
 check "offset file applied live (30-2=28)" wait_for grep -q '"volume": 28' "$RUNDIR/cec-volume-bridge.log"
 
 echo "== idempotent hook"
+node "$OLD/runtime/watcher.js" </dev/null >/dev/null 2>&1 &   # чужой watcher.js запущен вручную
+wait_for nprocs "$OLD/runtime/watcher.js" 1
 sh "$HOOKDIR/95-cec-volume-bridge"
 sleep 0.5
 check "still one bridge process" test "$(procs "$CEC_DIR/cec_volume_bridge.py")" = 1
+check "hook stops a stray stock watcher.js" wait_for nprocs "$OLD/runtime/watcher.js" 0
+check "  ... and says so" grep -q 'hook: stopped stock watcher.js' "$RUNDIR/cec-volume-bridge.log"
 
 echo "== disable / enable / restart"
 out=$($RS disable)
@@ -415,6 +432,93 @@ check "  ... stock 91 hook restored" test -L "$HOOKDIR/91-earc-volume-overlay"
 check "  ... stock watcher running again" wait_for nprocs "$OLD/runtime/watcher.js" 1
 check "backend removed and stopped" test ! -e "$CEC_DIR" -a "$(procs "cec_volume_bridge.py")" = 0
 check "95 hook removed" test ! -e "$HOOKDIR/95-cec-volume-bridge"
+
+echo "== Homebrew Channel: the app package alone -> Install / Update on the settings screen"
+# Homebrew Channel ставит IPK (бэкенд внутри, файлы 0644) через appInstallService, как здесь заглушка
+python3 "$ROOT/backend/ipk.py" build "$ROOT/app" "$T/hb.ipk" "$ROOT/backend" >/dev/null
+luna-send -n 50 luna://com.webos.appInstallService/dev/install \
+	"{\"id\":\"$APP_ID\",\"ipkUrl\":\"$T/hb.ipk\",\"subscribe\":true}" </dev/null >"$T/hb.log" 2>&1 &
+hb=$!
+check "app installed from the package" wait_long grep -q '"state":"installed"' "$T/hb.log"
+kill "$hb" 2>/dev/null || true
+wait "$hb" 2>/dev/null || true
+check "  ... backend inside, not executable (like an IPK)" test -f "$APP/backend/remote-setup.sh" -a ! -x "$APP/backend/remote-setup.sh"
+HB="sh $APP/backend/remote-setup.sh"
+mkdir -p "$CEC_DIR"
+echo "$BASE" > "$CEC_DIR/args"                  # тест: dry-run без шины, ввода и аудио
+out=$($HB status)
+check "status from the app package: missing" test "$(head -n 1 <<<"$out")" = missing
+check "  ... offers the bundled backend" grep -qxF "bundled: backend $VER in the app - Install on the settings screen" <<<"$out"
+check "  ... no backend/update lines" not grep -qE '^(backend|update): ' <<<"$out"
+mv "$OLD/index.html" "$OLD/index.html.stock"     # eARC Volume Overlay снова с заменённым index.html и watcher.js
+echo 'REPLACED INDEX' > "$OLD/index.html"
+: > "$OLD/overlay.js"
+out=$(: | $HB activate 2>"$T/activate.err")
+while IFS= read -r line; do echo "     | $line"; done < "$T/activate.err"
+check "activate (Install): running" test "$(head -n 1 <<<"$out")" = running
+check "  ... eARC Volume Overlay: stock index.html back" \
+	test "$(cat "$OLD/index.html")" = 'STOCK INDEX' -a ! -e "$OLD/index.html.stock" -a ! -e "$OLD/overlay.js"
+check "  ... its 91 hook removed" test ! -e "$HOOKDIR/91-earc-volume-overlay"
+check "  ... its watcher.js stopped" wait_for nprocs "$OLD/runtime/watcher.js" 0
+check "  ... explained on stderr" \
+	grep -qxF "backend installed from the app: $VER ($CEC_DIR, hook $HOOKDIR/95-cec-volume-bridge)" "$T/activate.err"
+same_backend() { for f in cec_volume_bridge.py remote-setup.sh native-osd.sh; do cmp -s "$APP/backend/$f" "$CEC_DIR/$f" || return 1; done; }
+check "  ... files from the app package" same_backend
+check "  ... hook installed (+x)" test -x "$HOOKDIR/95-cec-volume-bridge"
+check "  ... status: backend version" grep -qxF "backend: $VER" <<<"$out"
+check "  ... nothing to install or update" not grep -qE '^(bundled|update): ' <<<"$out"
+check "  ... one bridge process" wait_for nprocs "$CEC_DIR/cec_volume_bridge.py" 1
+check "  ... args kept" grep -q -- '--dry-run' "$CEC_DIR/args"
+echo '# newer' >> "$APP/backend/native-osd.sh"         # Homebrew Channel обновил приложение
+out=$($HB status)
+check "app updated -> status offers the update" \
+	grep -qxF "update: backend $VER in the app, installed $VER - Update on the settings screen" <<<"$out"
+check "  ... the installed script says the same" grep -q '^update: ' <<<"$(sh "$CEC_DIR/remote-setup.sh" status)"
+pid1=$(cat "$RUNDIR/cec-volume-bridge.pid")
+out=$($HB activate 2>"$T/activate.err")
+check "activate (Update): running" test "$(head -n 1 <<<"$out")" = running
+check "  ... nothing left to update" not grep -q '^update: ' <<<"$out"
+check "  ... explained" grep -qxF "backend updated from the app: $VER -> $VER" "$T/activate.err"
+check "  ... bridge restarted" test "$(cat "$RUNDIR/cec-volume-bridge.pid")" != "$pid1"
+check "  ... new file in place" cmp -s "$APP/backend/native-osd.sh" "$CEC_DIR/native-osd.sh"
+sh "$CEC_DIR/remote-setup.sh" disable >/dev/null 2>&1
+echo '# newest' >> "$APP/backend/95-cec-volume-bridge"
+check "  ... a changed hook is an update too" grep -q '^update: ' <<<"$($HB status)"
+node "$OLD/runtime/watcher.js" </dev/null >/dev/null 2>&1 &
+wait_for nprocs "$OLD/runtime/watcher.js" 1
+out=$($HB activate 2>"$T/activate.err")
+check "update while disabled: stays disabled" test "$(head -n 1 <<<"$out")" = disabled -a "$(procs "$CEC_DIR/cec_volume_bridge.py")" = 0
+check "  ... stray stock watcher.js stopped (no hook run)" wait_for nprocs "$OLD/runtime/watcher.js" 0
+check "  ... explained" grep -q 'stays disabled' "$T/activate.err"
+check "  ... new hook in place" cmp -s "$APP/backend/95-cec-volume-bridge" "$HOOKDIR/95-cec-volume-bridge"
+mkdir -p "$T/nocmp"                               # ТВ без cmp: сравнивает python3
+for f in "$T"/stub/* "$T"/bb/*; do
+	n=${f##*/}
+	if [ "$n" != cmp ] && [ ! -e "$T/nocmp/$n" ]; then ln -s "$f" "$T/nocmp/$n"; fi
+done
+ln -s "$(command -v python3)" "$T/nocmp/python3"
+check "no cmp: python3 compares (same files)" not grep -q '^update: ' <<<"$(PATH=$T/nocmp $HB status)"
+echo '# changed' >> "$APP/backend/cec_volume_bridge.py"
+check "  ... and sees a change" grep -q '^update: ' <<<"$(PATH=$T/nocmp $HB status)"
+if out=$(sh "$CEC_DIR/remote-setup.sh" activate 2>&1); then rc=0; else rc=$?; fi
+check "activate outside the app package refused" test "$rc" != 0
+check "  ... explained" grep -q 'activate runs from the eArcNG app package' <<<"$out"
+mkdir -p "$T/other.app/backend"                    # backend/ чужого приложения
+cp "$APP/appinfo.json" "$T/other.app/"
+cp "$APP"/backend/* "$T/other.app/backend/"
+if out=$(sh "$T/other.app/backend/remote-setup.sh" activate 2>&1); then rc=0; else rc=$?; fi
+check "  ... also from another app's backend/" test "$rc" != 0 -a -n "$(grep 'activate runs from the eArcNG app package' <<<"$out")"
+rm -f "$TRK_DIR/disable"
+if out=$($HB activate 2>&1); then rc=0; else rc=$?; fi
+check "activate with an active trk501 refused" test "$rc" != 0 -a -n "$(grep 'trk501 lg-soundbar-volume-osd is enabled' <<<"$out")"
+touch "$TRK_DIR/disable"
+cp "$APP/backend/cec_volume_bridge.py" "$T/bridge-copy.py"
+rm -f "$APP/backend/cec_volume_bridge.py"
+if out=$($HB activate 2>&1); then rc=0; else rc=$?; fi
+check "incomplete app package refused" test "$rc" != 0 -a -n "$(grep 'the app package has no cec_volume_bridge.py' <<<"$out")"
+out=$(: | sh "$CEC_DIR/remote-setup.sh" uninstall)
+check "uninstall after Homebrew Channel install: app and backend gone" \
+	test -n "$(grep -x uninstalled <<<"$out")" -a ! -e "$APP" -a ! -e "$CEC_DIR" -a ! -e "$HOOKDIR/95-cec-volume-bridge"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "shell integration: ALL PASSED"; else echo "shell integration: $FAILS FAILED"; exit 1; fi

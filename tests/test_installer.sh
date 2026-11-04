@@ -52,6 +52,10 @@ out=$("$INST" root@192.0.2.10 check 2>&1)
 show "$out"
 check "python3 detected" grep -q 'python3: 3\.' <<<"$out"
 check "CEC probe ran (no device here)" grep -q 'CEC: no /dev/cec\*' <<<"$out"
+check "EIM probe ran (no getArcVolume here)" grep -q '^EIM getArcVolume: unavailable ({"returnValue":false,' <<<"$out"
+echo 11 > "$T/arc"
+check "  ... and with getArcVolume" grep -qx 'EIM getArcVolume: Volume 11 - --arc-source auto uses it when the CEC bus brings no 50:7A' \
+	<<<"$(FAKE_ARC_FILE=$T/arc "$INST" root@192.0.2.10 check 2>&1)"
 check "eArcNG app: not installed yet" grep -qx 'eArcNG app: not installed yet (install builds and installs it)' <<<"$out"
 check "eARC Volume Overlay found: not needed" grep -q "^eARC Volume Overlay (Nikolay1243): $OLD (version 1.4.0) - not needed: install turns off its watcher.js" <<<"$out"
 check "QML compositor detected" grep -q 'UI: QML compositor .*(ui native)' <<<"$out"
@@ -67,7 +71,7 @@ out=$(FORCE=1 SSH_KEY=/dev/null "$INST" root@192.0.2.10 install 2>&1)
 rm -f "$T/var/lib/webosbrew/init.d/60-volume-osd"
 show "$(tail -n 4 <<<"$out")"
 check "FORCE=1 -> installed and running" grep -qx running <<<"$out"
-check "eArcNG app installed (IPK built on the TV)" diff -r "$ROOT/app" "$APP"
+check "eArcNG app installed (IPK built on the TV, backend inside)" python3 "$ROOT/backend/ipk.py" same "$ROOT/app" "$APP" "$ROOT/backend"
 check "eARC Volume Overlay untouched" test "$(cat "$OLD/index.html")" = STOCK -a ! -e "$OLD/index.html.stock"
 check "stage removed" test ! -d /tmp/cec-volume-stage
 check "host passed to ssh" grep -qx 'root@192.0.2.10' "$T/ssh-hosts"
@@ -139,6 +143,37 @@ out=$(cd "$T" && "$INST" root@192.0.2.10 report 2>&1)
 check "report without the backend: bridge 'none'" grep -qx 'installed bridge: none' "$T/earcng-report.txt"
 check "  ... status: missing (default file name, current folder)" \
 	test "$(grep -A1 -x '== status' "$T/earcng-report.txt" | tail -n 1)" = missing
+
+echo "== not installed: a clear message instead of \"sh: can't open .../remote-setup.sh\""
+if out=$("$INST" root@192.0.2.10 status 2>&1); then rc=0; else rc=$?; fi
+show "$out"
+check "status: exit 0, first line missing" test "$rc" = 0 -a "$(head -n 1 <<<"$out")" = missing
+check "  ... not installed + how to install" grep -q '^eArcNG is not installed on this TV - install: .* install' <<<"$out"
+check "  ... no \"can't open\", no ssh error line" test -z "$(grep -e "can't open" -e '^error: line' <<<"$out")"
+for a in restart log "args --position center" "ui native" monitor; do
+	# shellcheck disable=SC2086  # действие с флагами
+	if out=$("$INST" root@192.0.2.10 $a 2>&1); then rc=0; else rc=$?; fi
+	check "$a: exit 1, backend not installed" test "$rc" = 1 -a -n "$(grep '^error: the eArcNG backend is not installed on this TV' <<<"$out")"
+	check "  ... no \"can't open\", no ssh error line" test -z "$(grep -e "can't open" -e '^error: line' <<<"$out")"
+done
+if out=$("$INST" root@192.0.2.10 uninstall 2>&1); then rc=0; else rc=$?; fi
+check "uninstall: nothing to uninstall, exit 0" test "$rc" = 0 -a "$out" = 'nothing to uninstall: eArcNG is not installed on this TV'
+
+echo "== app from Homebrew Channel, Install on the settings screen not pressed yet"
+mkdir -p "$APP"
+cp -R "$ROOT/app/." "$APP/"
+cp -R "$ROOT/backend" "$APP/backend"
+out=$("$INST" root@192.0.2.10 status 2>&1)
+show "$out"
+check "status from the app's copy: missing + bundled backend" \
+	test "$(head -n 1 <<<"$out")" = missing -a -n "$(grep -x "bundled: backend $ver in the app - Install on the settings screen" <<<"$out")"
+check "log from the app's copy" test -n "$("$INST" root@192.0.2.10 log 2>&1 | grep 'config: ')"
+if out=$("$INST" root@192.0.2.10 restart 2>&1); then rc=0; else rc=$?; fi
+check "restart: exit 1, backend not installed" test "$rc" = 1 -a -n "$(grep '^error: the eArcNG backend is not installed on this TV' <<<"$out")"
+check "uninstall from the app's copy" grep -qx uninstalled <<<"$("$INST" root@192.0.2.10 uninstall 2>&1)"
+check "  ... eArcNG app removed" test ! -e "$APP"
+check "  ... no backend, no hook left" test ! -e "$T/home/root/cec-volume" -a ! -e "$T/var/lib/webosbrew/init.d/95-cec-volume-bridge"
+
 if out=$("$INST" 2>&1); then rc=0; else rc=$?; fi
 check "no args -> usage, exit 2" test "$rc" = 2
 check "  ... usage lists report" grep -q 'report' <<<"$out"

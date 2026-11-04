@@ -37,13 +37,21 @@ right on key press, with native timings.
 * **Own app eArcNG** (`com.github.emoorpheus.earcng`, with an icon in the app list): `install` builds its package
   on the TV and installs it with the system installer (`appInstallService`), no Homebrew Channel listing needed.
   It shows the overlay and the settings screen.
+* **Install from Homebrew Channel** (1.1.0): add the eArcNG repository to Homebrew Channel, install the app there
+  and press **Install** on its settings screen: the app package carries the backend
+  (see [Install from Homebrew Channel](#install-from-homebrew-channel-110)).
+* **Second volume source** (1.1.0, `--arc-source`): when the CEC bus brings no `50:7A` (no `/dev/cec*`, no
+  access, the bus is silent), the bridge asks the TV's eARC service
+  `luna://com.webos.service.eim/getArcVolume` (Nikolay1243's idea from v1.4.0). It is the soundbar's value as the TV
+  knows it, not the TV's key-press counter.
 * **Settings screen** in the eArcNG app: a status ring, one Enable/Disable button and Test, almost no text. Black
   background for OLED, details only when something is wrong, version and project link at the bottom. **English or
   Russian, following the TV language** (see [Language](#language)).
 * **Overlay** (`ui overlay`): default look `badge` (Ø96 px circle left of the native ARC column, vertically
   centered), colors and shadow taken from the native indicator's metrics. It hides **1500 ms after the last key
-  press** (like the native one; the bridge passes the key time `kt`), fade 150 ms; when it appears (cold app launch,
-  ~1.5–1.8 s on OLED65M59LA), it stays the full 1500 ms.
+  press** (like the native one; the bridge passes the key time `kt`), fade 150 ms; when it appears (cold app launch:
+  on OLED65M59LA the window reached the screen ~0.5–1.5 s after the press), it stays the full 1500 ms from its first
+  frame on screen.
 * `--keepalive N` (experimental): the hidden overlay window lives N more seconds, so the next appearance needs no
   cold app launch.
 * Native-mode safeguards: the patch is verified before mounting, rollback if the UI fails, CEC feedback guard
@@ -120,6 +128,7 @@ a few seconds after the TV starts); until then the overlay is shown.
  │ InputWatcher  Vol± pressed/released (evdev, no grab)                                     │
  │ CecBus        /dev/cec0 monitor + 05:45 "tap guard" + 05:71 final query                  │
  │ LogFollower   inotify on /var/log/cecmessages (fallback, rotation/truncation)            │
+ │ EimPoller     --arc-source auto|eim: eim/getArcVolume while the bus brings no 50:7A      │
  │ AudioSubscriber  soundOutput, volume, muteStatus from audio/getVolume (PTY)              │
  │ Hub           dedup · 0/100 limit · hold · scale/max/offset · key-press time             │
  │ NativeSink    ui native: audio setVolume (one in flight, latest wins)                    │
@@ -142,10 +151,13 @@ backend/cec_volume_bridge.py   backend (Python 3.6+, stdlib only); --probe, --pr
 backend/native-osd.sh          QML patch of the system indicator: check|apply|revert|status (POSIX sh)
 backend/95-cec-volume-bridge   Homebrew Channel init.d hook (POSIX sh)
 backend/remote-setup.sh        on the TV: install|enable|disable|restart|status|log|args|ui|switch|uninstall
-backend/ipk.py                 builds the app package (IPK) on the TV, like ares-package (Python stdlib)
+backend/ipk.py                 builds the app package (IPK) on the TV, like ares-package (Python stdlib);
+                               the package carries backend/ (Install / Update on the settings screen)
 app/                           the eArcNG app: appinfo.json, icons, index.html|overlay.js|overlay.css
                                (settings screen EN/RU + OSD)
 tools/earcng.sh                from a PC over SSH (Bash 3.2+, i.e. macOS's stock bash too)
+tools/make-release.py          release files: IPK, Homebrew Channel manifest, zip, SHA256SUMS (maintainer)
+repo.json                      Homebrew Channel repository (points to the manifest of the latest release)
 tests/                         tests without a TV (run-all.sh), TV telemetry, QML fixtures, luna-send stub, previews
 .github/ISSUE_TEMPLATE/        issue form for compatibility reports (the output of `report`)
 ```
@@ -174,6 +186,11 @@ modes. The summary line:
 * `tap guard + 05:71 available`: real-time monitor is available and frames can be sent;
 * `real-time monitor only`: monitor only;
 * `log-only mode`: log only.
+
+Then one read of the TV's eARC service (1.1.0):
+* `EIM getArcVolume: Volume N - …`: the second volume source answers (`--arc-source auto` uses it when the CEC
+  bus brings no `50:7A`);
+* `EIM getArcVolume: unavailable (…)`: it does not; CEC works as before.
 
 The last line is a trial QML patch on copies in a temporary directory (nothing is mounted):
 * `native OSD: applicable - …`: `ui native` fits this firmware;
@@ -220,6 +237,34 @@ On the TV, open **eArcNG** from the app list (a custom launcher may need it adde
 
 Re-running `install` updates the files and the app; `args` and the `ui` mode are kept.
 
+## Install from Homebrew Channel (1.1.0)
+
+The way without a PC. Checked on one TV (OLED65M59LA, webOS 10.3.0, Homebrew Channel 0.7.3) with a test
+repository on the local network: the list with the icon, the details page, INSTALL, **Install** on the settings
+screen (the bridge was running within ~3 s), **Update** after a test 1.1.1 package. The address in step 1 takes
+the manifest from the latest release (1.1.0 and later); with this address it has not been checked on a TV yet.
+
+1. Homebrew Channel → Settings → add the repository
+   `https://raw.githubusercontent.com/emoorpheus/earcng/main/repo.json` (the extra repositories field).
+2. Install **eArcNG** from the Homebrew Channel list (it needs root: Root status in Homebrew Channel must be ok).
+3. Open **eArcNG** from the app list. The settings screen shows "Not installed" and the **Install** button: the
+   app package carries the backend (`backend/` in the app folder). **Install** runs
+   `<app>/backend/remote-setup.sh activate` as root through Homebrew Channel: the same checks as `install`
+   (root, `python3`, trk501), then the backend goes to `/home/root/cec-volume/` and the hook to
+   `/var/lib/webosbrew/init.d/`, and the bridge starts.
+4. **Update**: when Homebrew Channel updates the app and the app brings another backend, the settings screen
+   shows **Update** ("The app brings backend X (installed Y)"). `status` shows the same as
+   `update: backend X in the app, installed Y`. A disabled bridge stays disabled after the update (checked on the
+   TV with test packages 1.1.1 and 1.1.0).
+
+Removing: run `uninstall` (from the PC or `sh /home/root/cec-volume/remote-setup.sh uninstall` over SSH), it
+removes the QML patch, the hook, the backend and the app. If only the app is removed in Homebrew Channel, the
+bridge keeps running, but `ui overlay` has no window to show; the log then shows
+`launch rejected: … - is the eArcNG app (com.github.emoorpheus.earcng) installed?` once per 5 minutes, not on
+every key press.
+
+Both ways put the same app on the TV (same id and package layout, the backend inside).
+
 ## Step 4. System indicator (`ui native`, webOS ≤ 10.x)
 
 ```bash
@@ -262,6 +307,7 @@ Flags are validated before writing (`--print-config`). A typo or an abbreviation
 | `--no-final-query`, `--query-delay 0.6` | final `05:71` after a series |
 | `--no-prelaunch` | open the window only on a 7A report, not early on key press |
 | `--no-cec-device` / `--cec-dev /dev/cec1` | log only / another device |
+| `--arc-source auto\|cec\|eim` | volume source (1.1.0): `auto` (default) = CEC `50:7A`, the TV's `eim/getArcVolume` only while the bus brings none; `cec` = never ask the TV; `eim` = values only from `getArcVolume` (key presses, tap guard and `05:71` stay) |
 | `--no-input`, `--no-audio`, `--debug` | don't read the remote / no `getVolume` (then no `ui native` either) / verbose log |
 
 The display mode is set with the `ui` command (file `/home/root/cec-volume/ui`), not via `args`.
@@ -285,11 +331,17 @@ fills.
 ![Settings screen: running with the indicator choice (Russian and English TV language), confirmation, switching](docs/setup.jpg)
 
 * The ring shows the bridge state: colored = running (the line below tells where the number is shown: system
-  indicator or overlay), grey = disabled, red = stopped or not installed, spinning = a command is running.
+  indicator or overlay), grey = disabled or not installed yet (with **Install**), red = stopped, or not installed
+  and the app has no backend to install, spinning = a command is running.
 * **Disable** / **Enable** (`remote-setup.sh disable|enable`) is one button, its label follows the state; it is
   inactive while a command runs. **Test** plays a short OSD demo and returns to the screen.
 * Details (the last bridge error, a Homebrew Channel error) appear under the buttons only when something is
-  wrong; the full status: `./tools/earcng.sh root@TV status`.
+  wrong; the full status: `./tools/earcng.sh root@TV status`. Known Homebrew Channel errors get a plain hint
+  first (1.1.0): root access refused ("check Root status in Homebrew Channel settings"), not run as root, Homebrew
+  Channel service not found, trk501 running, no `python3`; the TV's own error text follows after "—".
+* **Install** / **Update** (1.1.0, app from Homebrew Channel): **Install** takes the place of Enable while the
+  backend is not installed and the app package carries one; **Update** appears next to Test when the app brings
+  another backend (see [Install from Homebrew Channel](#install-from-homebrew-channel-110)).
 * **Volume indicator: System / Overlay** (webOS ≤ 10.x, only while the bridge is running and the firmware has the
   QML compositor): the highlighted button is the current mode. Pressing the other one asks to press again (the TV
   interface restarts and closes open apps, a custom launcher too; the screen may go black for ~15 s), the second
@@ -334,6 +386,14 @@ changing the TV language just open the app again. Error details from the TV stay
   `appInstallService` reply is in `/tmp/earcng-install.log` on the TV. Nothing else was changed.
 * The settings screen did not open again after a switch: the end of `/tmp/cec-volume-ui.log` on the TV
   (`settings screen not reopened`); open eArcNG from the app list.
+* `arc source: eim getArcVolume (<reason>)` / `arc source: CEC 50:7A (eim polling paused)`: which volume source
+  is in use (`--arc-source`); `getArcVolume unavailable (…)`: the TV's eARC service does not answer, it is asked
+  again in 60 s.
+* `launch rejected: … - is the eArcNG app (…) installed?`: the TV refused to open the overlay window, usually because
+  the app was removed (e.g. in Homebrew Channel). Logged once per 5 minutes with the number of repeats.
+* `error: the eArcNG backend is not installed on this TV - …` (`restart`, `args`, `ui`, `monitor`; `log` too when
+  the app is not installed either): install it with `install` from the PC or with **Install** on the settings
+  screen of the eArcNG app; `status` prints `missing` then.
 
 ## Report a problem
 
@@ -387,7 +447,15 @@ is built with `FEATURE_PREFER_APPLETS` and is rejected by `tests/test_shell.sh`.
   `report` (file = output, model, versions, status, log, no TV address, clipboard), `uninstall` through an ssh
   stub, including under bash 3.2.57.
 * `tests/test_ipk.py`: the package from `backend/ipk.py`: `ar` members, `control`, paths and modes in
-  `data.tar.gz`, `packageinfo.json`, the same bytes on every build, hidden files skipped, `same`.
+  `data.tar.gz`, `packageinfo.json`, the same bytes on every build, hidden files skipped, `same`, `backend/` inside.
+* `tests/test_release.py`: `tools/make-release.py` in a temporary git repository: the IPK and the zip come from
+  the tag, the manifest (hash, size, URLs), `SHA256SUMS`, refusals (versions, tag, CHANGELOG, release notes),
+  a test repository (`--base-url`); `repo.json` matches.
+* EIM and Homebrew Channel (1.1.0): `tests/test_bridge.py` (the `getArcVolume` reply, polling rates, `auto` / `cec`
+  / `eim`, mute, the same value after a key press, `Unavailable`, `--probe`, the log not repeating `launch
+  rejected`), `tests/test_shell.sh` (the app package alone: `status` offers Install / Update, `activate`, a
+  disabled bridge stays disabled, no `cmp` on the TV, refusals), `tests/test-overlay.cjs` (Install / Update
+  buttons and commands, the hints for Homebrew Channel errors in EN/RU).
 * `tests/test-overlay.cjs`: overlay lifecycle (accept/drop, positions, 1500/150 timings, `kt`, keepalive,
   window close); settings screen: status and button for every `status` reply, busy state, late replies, remote
   navigation, the version at the bottom = the bridge version; indicator choice: when it is shown, confirmation,
@@ -409,6 +477,11 @@ CI (`.github/workflows/tests.yml`) runs `tests/run-all.sh` with `REQUIRE_ALL=1` 
   were not checked against the firmware.
 * Language detection has been checked on one TV (OLED65M59LA, 10.3.0: Russian and English menu language); other
   TVs not yet. If detection fails, the screen is in English.
+* 1.1.0 has been checked on one TV (OLED65M59LA, 10.3.0, Homebrew Channel 0.7.3) over SSH, without a remote: the
+  EIM source (`eim`, and `auto` without the CEC device: the value 0.18–0.4 s after a step; in a fast series values
+  in between may be skipped, the last one is right), installing from Homebrew Channel with a test repository,
+  Install / Update on the settings screen. Not yet: the repository address from `main`, the
+  hints for Homebrew Channel errors, mute with `eim`, `auto` when the bus works but the soundbar is silent.
 * The eArcNG app (install with `appInstallService`, the icon in the app list, `uninstall` and a fresh install),
   the settings screen and the indicator choice on it (switching both ways,
   confirmation, cancel, the screen reopening with the result) have been checked on one TV (OLED65M59LA, 10.3.0, with
@@ -421,7 +494,8 @@ eArcNG by [emoorpheus](https://github.com/emoorpheus). Built on:
 * [trk501/lg-soundbar-volume-osd](https://github.com/trk501/lg-soundbar-volume-osd): CEC logic, the `05:45` tap
   guard, the QML patch method for the system indicator (the `sed` replacements are reproduced, the code is our own).
 * [Nikolay1243/Webos-EARC-Volume-Overlay](https://github.com/Nikolay1243/Webos-EARC-Volume-Overlay): the
-  original overlay app and its technique of a floating window without focus, which the eArcNG app uses.
+  original overlay app and its technique of a floating window without focus, which the eArcNG app uses; the
+  `eim/getArcVolume` source and the Homebrew Channel repository layout (v1.4.0).
 Developed with the help of AI assistants (Claude, Gemini, ChatGPT); tested by the author on a real TV (see Limitations).
 MIT license, see [LICENSE](LICENSE). Not affiliated with LG Electronics or Sony; LG, webOS and Sony are trademarks
 of their respective owners. Use root access to your TV at your own risk.

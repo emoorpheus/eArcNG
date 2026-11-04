@@ -146,6 +146,50 @@ class IpkTest(unittest.TestCase):
         self.assertEqual(run("same", APP, inst).returncode, 1, "missing file")
         self.assertEqual(run("same", APP, os.path.join(self.tmp, "none")).returncode, 1)
 
+    def test_backend_bundled(self):
+        backend = os.path.join(ROOT, "backend")
+        out = os.path.join(self.tmp, "with.ipk")
+        r = run("build", APP, out, backend)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data_tgz = ar_members(open(out, "rb").read())[2]["data"]
+        apps = "./usr/palm/applications/%s/" % self.app_id
+        with tarfile.open(fileobj=io.BytesIO(data_tgz)) as t:
+            names = t.getnames()
+            files = sorted(n for n in names if n.startswith(apps + "backend/") and not n.endswith("/"))
+            self.assertEqual(files, [apps + "backend/" + f for f in ipk.BACKEND_FILES])
+            for f in ipk.BACKEND_FILES:
+                with open(os.path.join(backend, f), "rb") as src:
+                    self.assertEqual(t.extractfile(apps + "backend/" + f).read(), src.read(), f)
+            d = apps + "backend" if apps + "backend" in names else apps + "backend/"
+            self.assertLess(names.index(d), names.index(apps + "backend/cec_volume_bridge.py"), "directory first")
+            self.assertFalse([n for n in names if "__pycache__" in n or n.endswith(".pyc")])
+        r2 = run("build", APP, os.path.join(self.tmp, "with2.ipk"), backend)
+        self.assertEqual(open(os.path.join(self.tmp, "with2.ipk"), "rb").read(), open(out, "rb").read(), "reproducible")
+        # same: с бэкендом сравниваются и файлы backend/
+        inst = os.path.join(self.tmp, "installed")
+        shutil.copytree(APP, inst)
+        self.assertEqual(run("same", APP, inst).returncode, 0)
+        self.assertEqual(run("same", APP, inst, backend).returncode, 1, "backend/ missing")
+        shutil.copytree(backend, os.path.join(inst, "backend"))
+        self.assertEqual(run("same", APP, inst, backend).returncode, 0)
+        with open(os.path.join(inst, "backend", "remote-setup.sh"), "a") as f:
+            f.write("#")
+        self.assertEqual(run("same", APP, inst, backend).returncode, 1, "changed backend file")
+        # ошибки: нет файла бэкенда, в app/ уже есть backend/
+        part = os.path.join(self.tmp, "part")
+        os.makedirs(part)
+        shutil.copy(os.path.join(backend, "ipk.py"), part)
+        r = run("build", APP, os.path.join(self.tmp, "x.ipk"), part)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("backend file '95-cec-volume-bridge' not found", r.stderr)
+        app2 = os.path.join(self.tmp, "app2")
+        shutil.copytree(APP, app2)
+        os.makedirs(os.path.join(app2, "backend"))
+        open(os.path.join(app2, "backend", "x"), "w").write("x")
+        r = run("build", app2, os.path.join(self.tmp, "y.ipk"), backend)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("already has a backend/ directory", r.stderr)
+
     def test_errors(self):
         bad = os.path.join(self.tmp, "bad")
         os.makedirs(bad)

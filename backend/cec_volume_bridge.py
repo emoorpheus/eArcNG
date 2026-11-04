@@ -13,6 +13,8 @@
   * /var/log/cecmessages        - inotify-слежение, запасной путь (лог пишется пачками);
   * /dev/input/event*           - физическое состояние кнопок пульта (tap guard, ранний показ);
   * luna://com.webos.service.audio/master/getVolume - soundOutput (гейт "выход = ARC"), для native - volume/mute.
+  * luna://com.webos.service.eim/getArcVolume - громкость ARC, которую ТВ получил от саундбара (идея
+    Nikolay1243 v1.4.0): --arc-source auto берёт её, только пока CEC-шина не приносит 50:7A.
 Передаётся в шину только: 05:45 <User Control Released> (антиспам "быстрых тапов", идея trk501)
 и 05:71 <Give Audio Status> один раз в конце серии нажатий (контрольное значение).
 
@@ -36,11 +38,12 @@ import sys
 import threading
 import time
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DEFAULT_APP_ID = "com.github.emoorpheus.earcng"
 STATE_DIR = "/home/root/cec-volume"
 AUDIO_GET_VOLUME = "luna://com.webos.service.audio/master/getVolume"
 AUDIO_SET_VOLUME = "luna://com.webos.service.audio/master/setVolume"
+EIM_GET_ARC_VOLUME = "luna://com.webos.service.eim/getArcVolume"
 QML_VOLUME = "/usr/lib/qml/WebOSCompositor/views/volume/StarfishVolume.qml"
 APP_LAUNCH = "luna://com.webos.applicationManager/launch"
 POSITIONS = ("top-right", "top-left", "top-center", "center-right", "center-left",
@@ -54,6 +57,16 @@ FEEDBACK_WINDOW = 0.15     # кадр громкости ТВ в это окно
 FEEDBACK_IDLE = 1.5        # ...если пульт перед этим не трогали столько секунд
 FEEDBACK_STREAK = 3        # столько setVolume подряд с таким ответом -> native-синхронизация выключается
 REJECT_STREAK = 3          # столько отказов setVolume подряд -> native выключается (прошивка не даёт)
+ARC_SOURCES = ("auto", "cec", "eim")
+EIM_FAST = 0.15            # с: опрос getArcVolume сразу после нажатия/изменения (как у Nikolay1243 v1.4.0)
+EIM_FAST_FOR = 2.5         # с: ...столько после последнего нажатия/изменения
+EIM_IDLE = 1.0             # с: опрос в остальное время
+EIM_GRACE = 2.0            # с: auto - после старта сначала ждать CEC-шину
+EIM_BUS_WAIT = 1.0         # с: auto - шина работает, но после нажатия 50:7A нет столько -> EIM
+EIM_SETTLE = 0.5           # с: EIM - "то же значение" раньше этого после нажатия ещё не ответ саундбара
+EIM_FAILS = 5              # неудач getArcVolume подряд -> компонент недоступен (повтор через 60 с)
+EIM_TIMEOUT = 1.5          # с: один вызов luna-send
+REJECT_RELOG = 300.0       # с: тот же отказ launch пишется в лог не чаще
 
 # --- HDMI-CEC ---------------------------------------------------------------
 LA_TV, LA_AUDIO = 0x0, 0x5
@@ -154,6 +167,33 @@ def decode_status(status):
     return bool(status & 0x80), (vol if vol <= 100 else None)
 
 
+def parse_arc_volume(text):
+    """Ответ eim/getArcVolume -> (громкость 0..100, mute | None) или None.
+    OLED65M59LA (10.3.0): {"Volume":10}, без returnValue. 128..228 = бит mute, как в байте 0x7A (догадка)."""
+    i = text.find("{")
+    if i < 0:
+        return None
+    try:
+        obj = json.JSONDecoder().raw_decode(text[i:])[0]
+    except ValueError:
+        return None
+    if not isinstance(obj, dict) or obj.get("returnValue") is False:
+        return None
+    vol = obj.get("Volume", obj.get("volume"))
+    if not isinstance(vol, int) or isinstance(vol, bool):
+        return None
+    if 0 <= vol <= 100:
+        return vol, None
+    if 0x80 <= vol <= 0x80 + 100:
+        return vol - 0x80, True
+    return None
+
+
+def short_reply(text, limit=120):
+    line = " ".join(text.split())
+    return (line[:limit] + "...") if len(line) > limit else (line or "no reply")
+
+
 def output_allowed(name, cfg):
     if cfg.any_output or not name:          # неизвестно -> не блокируем (7A шлёт только аудиосистема)
         return True
@@ -182,6 +222,8 @@ class Hub(object):
         self.remote_at = -1e9
         self.remote_echo = False     # ждём CEC-эхо физического нажатия (его время уже учтено)
         self.visible_until = -1e9    # когда оверлей погаснет (оценка)
+        self.tv_mute = None          # muteStatus ТВ (audio getVolume) - mute для значений EIM
+        self.activity = None         # threading.Event опроса EIM: нажатие будит его сразу
 
     def offset(self):
         try:
@@ -207,6 +249,8 @@ class Hub(object):
         return self.native is not None and self.native.active()
 
     def set_tv_state(self, volume, mute):
+        if mute is not None:
+            self.tv_mute = mute
         if self.native is None:
             return
         with self.lock:
@@ -214,6 +258,7 @@ class Hub(object):
                 self._native(self.raw, self.mute, True, False, False)    # состояние ТВ стало известно
 
     def forget_tv_state(self):
+        self.tv_mute = None
         if self.native is not None:
             self.native.forget_tv_state()
 
@@ -235,6 +280,8 @@ class Hub(object):
             self.key_since_report = True
             self._key_time(kind, source, now)
             dbg("key %s (%s)" % (kind, source))
+            if self.activity is not None:
+                self.activity.set()                  # опрос EIM - сразу и часто
             if self.native_on():
                 return                               # нативный индикатор появляется сам, мгновенно
             if not self.output_ok or self.raw is None or kind == "mute":
@@ -255,11 +302,20 @@ class Hub(object):
         if raw is None:
             dbg("audio status 0x%02X: volume unknown, ignored" % status)
             return
+        self._on_volume(raw, mute, source, 0.0)
+
+    def on_level(self, raw, mute, source):
+        """Громкость без байта Audio Status (EIM getArcVolume). mute None -> muteStatus ТВ, если известен."""
+        self._on_volume(raw, bool(self.tv_mute) if mute is None else mute, source, EIM_SETTLE)
+
+    def _on_volume(self, raw, mute, source, settle):
         with self.lock:
             now = self.clock()
             key_recent = self.key_since_report and now - self.key_at <= self.cfg.key_window
             first = self.raw is None
             changed = raw != self.raw or mute != self.mute
+            if not changed and key_recent and now - self.key_at < settle:
+                return                       # опрос опередил саундбар: ждать нового значения
             self.raw, self.mute = raw, mute
             self.key_since_report = False
             dbg("report raw=%d mute=%s (%s) first=%s changed=%s key=%s%s"
@@ -333,6 +389,7 @@ class Publisher(object):
         self.pending = None
         self.cv = threading.Condition()
         self.luna = shutil.which("luna-send") or "/usr/bin/luna-send"
+        self.reject, self.reject_at, self.reject_count = None, -1e9, 0
         if not dry_run:
             t = threading.Thread(target=self._worker, name="publisher")
             t.daemon = True
@@ -366,7 +423,7 @@ class Publisher(object):
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=self.timeout)
                 out = r.stdout.decode("utf-8", "replace")
                 if '"returnValue":false' in out.replace(" ", ""):
-                    log("launch rejected: " + out.strip()[:300])
+                    self.rejected(out.strip()[:300], time.monotonic())
                 dbg("launch %s/%s %d in %d ms" % (p["reason"], p["seq"], p["volume"],
                                                   (time.monotonic() - t0) * 1000))
             except subprocess.TimeoutExpired:
@@ -374,6 +431,15 @@ class Publisher(object):
             except OSError as e:
                 log("luna-send failed: %s" % e)
                 time.sleep(1)
+
+    def rejected(self, text, now):
+        # приложение удалили (например, в Homebrew Channel), а мост работает: не писать отказ на каждое нажатие
+        if text == self.reject and now - self.reject_at < REJECT_RELOG:
+            self.reject_count += 1
+            return
+        more = " [%d repeats not logged]" % self.reject_count if self.reject_count else ""
+        log("launch rejected: %s - is the eArcNG app (%s) installed?%s" % (text, self.app_id, more))
+        self.reject, self.reject_at, self.reject_count = text, now, 0
 
 
 class NativeSink(object):
@@ -566,17 +632,19 @@ class NativeSink(object):
 
 # --- /var/log/cecmessages ---------------------------------------------------
 class LineSink(object):
-    """Строки лога -> Hub. Из пачки берётся только НОВЕЙШИЙ 7A (лог пишется с задержкой пачками)."""
+    """Строки лога -> Hub. Из пачки берётся только НОВЕЙШИЙ 7A (лог пишется с задержкой пачками).
+    7A из лога не нужен, если его видит шина или значения даёт EIM (лог запаздывает)."""
 
-    def __init__(self, hub, bus=None):
-        self.hub, self.bus = hub, bus
+    def __init__(self, hub, bus=None, eim=None):
+        self.hub, self.bus, self.eim = hub, bus, eim
 
     def __call__(self, lines):
         events = [ev for line in lines for _, fr in parse_frames(line) for ev in [classify(fr)] if ev]
         last = max([i for i, ev in enumerate(events) if ev[0] == "report"] or [-1])
-        bus = self.bus
+        bus, eim = self.bus, self.eim
+        reports = not (bus and bus.sees_reports) and not (eim and eim.takes_reports())
         for i, ev in enumerate(events):
-            if ev[0] == "report" and i == last and not (bus and bus.sees_reports):
+            if ev[0] == "report" and i == last and reports:
                 self.hub.on_report(ev[1], "log")
             elif ev[0] == "key" and not (bus and bus.sees_keys):
                 self.hub.on_key(ev[1], "log")
@@ -805,6 +873,7 @@ class CecBus(object):
     def __init__(self, cfg, hub, keys):
         self.cfg, self.hub, self.keys = cfg, hub, keys
         self.sees_reports = self.sees_keys = False     # тогда лог для этих событий игнорируется
+        self.running = False                           # монитор открыт (для --arc-source auto)
 
     def device(self):
         if self.cfg.cec_dev:
@@ -835,9 +904,10 @@ class CecBus(object):
                     os.close(tx)
                 tx = None
             log("CEC monitor on %s%s" % (path, "" if tx is not None else " (read-only)"))
+            self.running = True
             self.loop(stop, mon, tx)
         finally:
-            self.sees_reports = self.sees_keys = False
+            self.sees_reports = self.sees_keys = self.running = False
             os.close(mon)
             if tx is not None:
                 os.close(tx)
@@ -882,7 +952,8 @@ class CecBus(object):
                         self.hub.tv_frame(ev, now, self.keys.idle_for(now))
                     if ev[0] == "report":
                         self.sees_reports = True
-                        self.hub.on_report(ev[1], "cec")
+                        if self.cfg.arc_source != "eim":     # --arc-source eim: значения только из EIM
+                            self.hub.on_report(ev[1], "cec")
                     elif ev[0] == "key":
                         self.sees_keys = True
                         self.hub.on_key(ev[1], "cec")
@@ -1011,6 +1082,121 @@ class AudioSubscriber(object):
             self.hub.set_tv_state(vol, mute)          # нужно только --ui native
 
 
+# --- громкость ARC от eim-сервиса (--arc-source auto|eim) ---------------------
+def eim_query(luna=None, timeout=EIM_TIMEOUT):
+    """Один вызов getArcVolume. stdin - /dev/null: из канала luna-send на ТВ ничего не выводит."""
+    luna = luna or shutil.which("luna-send") or "/usr/bin/luna-send"
+    r = subprocess.run([luna, "-n", "1", EIM_GET_ARC_VOLUME, "{}"], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+    return r.stdout.decode("utf-8", "replace")
+
+
+def probe_eim(query=eim_query):
+    """--probe: что отвечает getArcVolume (только чтение)."""
+    try:
+        text = query()
+    except (OSError, subprocess.SubprocessError) as e:
+        return ["EIM getArcVolume: unavailable (%s)" % e]
+    got = parse_arc_volume(text)
+    if got is None:
+        return ["EIM getArcVolume: unavailable (%s)" % short_reply(text)]
+    return ["EIM getArcVolume: Volume %d%s - --arc-source auto uses it when the CEC bus brings no 50:7A"
+            % (got[0], " muted" if got[1] else "")]
+
+
+class EimPoller(object):
+    """Опрос luna://com.webos.service.eim/getArcVolume (идея Nikolay1243 v1.4.0): 150 мс в течение 2,5 с
+    после нажатия или изменения, иначе 1 с; нажатие будит опрос сразу.
+      auto - только пока CEC-шина не даёт 50:7A: нет /dev/cec*, монитор не открылся или после нажатия
+             отчёта нет EIM_BUS_WAIT с (тогда 50:7A из лога не показываются - лог запаздывает);
+      eim  - всегда, а 50:7A с шины и из лога не показываются (нажатия, tap guard и 05:71 - как раньше)."""
+
+    def __init__(self, hub, cfg, bus=None, query=eim_query, clock=time.monotonic):
+        self.hub, self.cfg, self.bus, self.query, self.clock = hub, cfg, bus, query, clock
+        self.wake = threading.Event()
+        hub.activity = self.wake
+        self.started = None
+        self.active = False          # опрос идёт (для лога переключений)
+        self.delivering = False      # последний опрос дал значение -> 50:7A из лога не нужен
+        self.changed_at = -1e9
+        self.last = None
+        self.fails, self.error = 0, ""
+
+    def takes_reports(self):
+        return self.cfg.arc_source == "eim" or self.delivering
+
+    def wanted(self, now):
+        if self.cfg.arc_source == "eim":
+            return True
+        bus = self.bus
+        if bus is None:
+            return True
+        if now - self.started < EIM_GRACE:
+            return False
+        if not bus.running:
+            return True
+        key_at = self.hub.key_at
+        return not bus.sees_reports and key_at > self.started and now - key_at >= EIM_BUS_WAIT
+
+    def reason(self):
+        if self.cfg.arc_source == "eim":
+            return "--arc-source eim"
+        if self.bus is None:
+            return "no CEC device in use"
+        if not self.bus.running:
+            return "CEC monitor unavailable"
+        return "no 50:7A on the CEC bus after a key press"
+
+    def step(self):
+        """Один шаг: опросить, если нужно. Возвращает паузу до следующего шага (с)."""
+        now = self.clock()
+        if self.started is None:
+            self.started = now
+        want = self.wanted(now)
+        if want != self.active:
+            self.active = want
+            log("arc source: eim getArcVolume (%s)" % self.reason() if want
+                else "arc source: CEC 50:7A (eim polling paused)")
+        if not want:
+            self.delivering = False
+            return EIM_IDLE
+        try:
+            text = self.query()
+            got = parse_arc_volume(text)
+            if got is None:
+                self.error = short_reply(text)
+        except (OSError, subprocess.SubprocessError) as e:
+            got, self.error = None, str(e)
+        now = self.clock()
+        if got is None:
+            self.fails += 1
+            self.delivering = False
+            dbg("eim getArcVolume failed (%d): %s" % (self.fails, self.error))
+            if self.fails >= EIM_FAILS:
+                self.fails = 0
+                raise Unavailable("getArcVolume unavailable (%s)" % self.error)
+        else:
+            self.fails = 0
+            if self.wanted(now):                       # шина могла заговорить, пока шёл запрос
+                self.delivering = True
+                if got != self.last:
+                    self.changed_at = now
+                    self.last = got
+                self.hub.on_level(got[0], got[1], "eim")
+        recent = max(self.hub.key_at, self.changed_at)
+        return EIM_FAST if now - recent < EIM_FAST_FOR else EIM_IDLE
+
+    def __call__(self, stop):
+        self.started, self.fails = None, 0
+        try:
+            while not stop.is_set():
+                pause = self.step()
+                self.wake.wait(pause)
+                self.wake.clear()
+        finally:
+            self.delivering = False      # active остаётся: после повтора через 60 с лог не повторяется
+
+
 # --- запуск -----------------------------------------------------------------
 def run_forever(name, target, stop):
     delay, last = 5.0, None
@@ -1084,6 +1270,9 @@ def build_parser():
     a("--no-cec-device", dest="use_bus", action="store_false", help="log only: no monitor/tap guard/query")
     a("--no-input", dest="use_input", action="store_false", help="do not read remotes in /dev/input")
     a("--no-audio", dest="use_audio", action="store_false", help="no soundOutput gate (no luna subscription)")
+    a("--arc-source", choices=ARC_SOURCES, default="auto",
+      help="soundbar volume source: cec = 50:7A only; eim = luna eim/getArcVolume only; "
+           "auto (default) = 50:7A, getArcVolume while the CEC bus brings no 50:7A")
     a("--outputs", default="", help="allowed soundOutput values, comma separated (default: contains 'arc')")
     a("--any-output", action="store_true", help="show regardless of soundOutput")
     a("--scale", type=float, default=1.0, help="displayed = round(raw*scale)+offset (raw 0-100, bar 0-50: 0.5)")
@@ -1117,7 +1306,8 @@ def build_parser():
     a("--replay-speed", type=float, default=1.0, help="0 = no delays")
     a("--exit-after", type=float, default=0.0, help="stop after N seconds (earcng.sh try)")
     a("--print-config", action="store_true", help="validate options, print them as JSON and exit")
-    a("--probe", action="store_true", help="read-only check of /dev/cec* (caps, addresses, modes) and exit")
+    a("--probe", action="store_true",
+      help="read-only check of /dev/cec* (caps, addresses, modes) and eim getArcVolume, then exit")
     a("--version", action="version", version=VERSION)
     return p
 
@@ -1133,6 +1323,7 @@ def main(argv=None):
         return 0
     if args.probe:
         print("\n".join(probe_cec([args.cec_dev] if args.cec_dev else None)))
+        print("\n".join(probe_eim()))
         return 0
     if args.replay:
         args.dry_run, args.log_file = True, None
@@ -1160,22 +1351,25 @@ def main(argv=None):
     log("cec_volume_bridge %s start (pid %d, python %s, app %s)"
         % (VERSION, os.getpid(), sys.version.split()[0], args.app_id))
     log("config: ui=%s scale=%g max=%d offset=%+d variant=%s position=%s visible=%dms fade=%dms keepalive=%gs "
-        "outputs=%s tap-guard=%s%s"
+        "outputs=%s tap-guard=%s arc-source=%s%s"
         % (args.ui, args.scale, args.max, args.offset, args.variant or "badge", args.position or "center-right",
            args.visible_ms, args.fade_ms, args.keepalive,
            "any" if args.any_output else (args.outputs or "*arc*"), "on" if args.tap_guard else "off",
-           " DRY-RUN" if args.dry_run else ""))
+           args.arc_source, " DRY-RUN" if args.dry_run else ""))
     if native is not None and not native.refresh():       # refresh() сам пишет "native OSD patch active"
         log("ui native: QML patch not active (yet) - overlay until native-osd.sh apply succeeds")
-    keys, bus = KeyState(), None
+    keys, bus, eim = KeyState(), None, None
     if args.use_bus:
         bus = CecBus(args, hub, keys)
         spawn("cec-bus", bus, stop)
+    if args.arc_source != "cec":
+        eim = EimPoller(hub, args, bus)
+        spawn("arc-eim", eim, stop)
     if args.use_input:
         spawn("remotes", InputWatcher(hub, keys), stop)
     if args.use_audio:
         spawn("audio", AudioSubscriber(hub), stop)
-    spawn("cec-log", LogFollower(args.cec_log, LineSink(hub, bus)), stop)
+    spawn("cec-log", LogFollower(args.cec_log, LineSink(hub, bus, eim)), stop)
     deadline = time.monotonic() + args.exit_after if args.exit_after > 0 else None
     try:
         while not stop.is_set():

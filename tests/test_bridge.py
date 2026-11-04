@@ -942,5 +942,288 @@ class ReplayTelemetry(unittest.TestCase):
         self.assertTrue(all(p["reason"] == "report" for p in ext), "без kt - только изменения из приложения Sony")
 
 
+
+class FakeBus(object):
+    def __init__(self, running=True, sees_reports=False):
+        self.running, self.sees_reports, self.sees_keys = running, sees_reports, False
+
+
+class Script(object):
+    """Подмена eim_query: ответы по очереди (последний повторяется), Exception - выбросить."""
+    def __init__(self, *answers):
+        self.answers, self.calls = list(answers), 0
+
+    def __call__(self):
+        self.calls += 1
+        a = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+
+class Eim(unittest.TestCase):
+    """--arc-source auto|eim: luna://com.webos.service.eim/getArcVolume."""
+
+    def poller(self, *answers, **kw):
+        bus = kw.pop("bus", None)
+        hub, out, clock = make_hub(**kw)
+        q = Script(*answers)
+        return b.EimPoller(hub, hub.cfg, bus, query=q, clock=clock), hub, out, clock, q
+
+    def test_parse(self):
+        P = b.parse_arc_volume
+        self.assertEqual(P('{"Volume":10}'), (10, None), "ответ OLED65M59LA (10.3.0)")
+        self.assertEqual(P('junk\n{"Volume": 0}\n'), (0, None))
+        self.assertEqual(P('{"Volume":11}\n{"Volume":12}'), (11, None))
+        self.assertEqual(P('{"returnValue":true,"volume":100}'), (100, None))
+        self.assertEqual(P('{"Volume":139}'), (11, True), "бит mute, как в байте 0x7A")
+        for bad in ('', 'no json', '{"returnValue":false,"errorText":"Unknown method"}', '{"Volume":true}',
+                    '{"Volume":"5"}', '{"Volume":101}', '{"Volume":-1}', '{"Volume":229}', '[1]', '{"Volume":',
+                    '{"returnValue":false,"Volume":5}'):
+            self.assertIsNone(P(bad), bad)
+
+    def test_rates_and_wake(self):
+        e, hub, out, clock, q = self.poller('{"Volume":20}', arc_source="eim")
+        self.assertEqual(e.step(), b.EIM_FAST, "первое значение - изменение -> часто")
+        clock.advance(b.EIM_FAST_FOR + 0.1)
+        self.assertEqual(e.step(), b.EIM_IDLE)
+        self.assertFalse(e.wake.is_set())
+        hub.on_key("up", "remote")
+        self.assertTrue(e.wake.is_set(), "нажатие будит опрос сразу")
+        self.assertEqual(e.step(), b.EIM_FAST)
+        clock.advance(b.EIM_FAST_FOR - 0.1)
+        self.assertEqual(e.step(), b.EIM_FAST)
+        clock.advance(0.2)
+        self.assertEqual(e.step(), b.EIM_IDLE)
+        q.answers = ['{"Volume":21}']                     # пульт саундбара: изменение без нажатия на ТВ
+        self.assertEqual(e.step(), b.EIM_FAST)
+        self.assertEqual(q.calls, 6)
+
+    def test_auto_only_while_the_bus_brings_no_reports(self):
+        bus = FakeBus(running=True)
+        e, hub, out, clock, q = self.poller('{"Volume":20}', bus=bus)
+        logs = []
+        orig, b.log = b.log, lambda m, echo=True: logs.append(m)
+        try:
+            e.step()
+            clock.advance(b.EIM_GRACE + 1)
+            e.step()
+            self.assertEqual(q.calls, 0, "шина работает, нажатий не было - EIM не нужен")
+            hub.on_report(0x14, "cec")
+            bus.sees_reports = True
+            hub.on_key("up", "cec")
+            clock.advance(b.EIM_BUS_WAIT + 0.1)
+            e.step()
+            self.assertEqual(q.calls, 0, "шина приносит 50:7A")
+            bus.sees_reports = False                      # шину перезапустили, 50:7A ещё не было
+            hub.on_key("up", "cec")
+            clock.advance(b.EIM_BUS_WAIT - 0.1)
+            e.step()
+            self.assertEqual(q.calls, 0, "ответ саундбара ещё может прийти")
+            clock.advance(0.2)
+            e.step()
+            self.assertEqual(q.calls, 1)
+            self.assertTrue(e.takes_reports(), "значения из EIM - 50:7A из лога не нужен")
+            bus.sees_reports = True
+            e.step()
+            self.assertEqual(q.calls, 1)
+            self.assertFalse(e.takes_reports())
+            bus.running, bus.sees_reports = False, False  # монитор закрылся (Unavailable)
+            e.step()
+            self.assertEqual(q.calls, 2)
+        finally:
+            b.log = orig
+        self.assertEqual([m for m in logs if m.startswith("arc source")],
+                         ["arc source: eim getArcVolume (no 50:7A on the CEC bus after a key press)",
+                          "arc source: CEC 50:7A (eim polling paused)",
+                          "arc source: eim getArcVolume (CEC monitor unavailable)"])
+
+    def test_auto_without_bus_and_bus_race(self):
+        e, hub, out, clock, q = self.poller('{"Volume":20}', bus=None)
+        e.step()
+        self.assertEqual((q.calls, hub.raw), (1, 20), "нет /dev/cec (--no-cec-device) - EIM сразу")
+        self.assertTrue(e.takes_reports())
+        q.answers = [OSError(2, "No such file or directory")]
+        e.step()
+        self.assertFalse(e.takes_reports(), "опрос не удался - 50:7A из лога снова показываются")
+        bus = FakeBus(running=False)
+        e2, hub2, out2, clock2, q2 = self.poller('{"Volume":20}', bus=bus)
+        e2.step()
+        self.assertEqual(q2.calls, 0, "первые EIM_GRACE с ждём шину")
+        clock2.advance(b.EIM_GRACE)
+
+        def answer():                                     # шина заговорила, пока шёл запрос
+            bus.running = bus.sees_reports = True
+            return '{"Volume":33}'
+        e2.query = answer
+        e2.step()
+        self.assertIsNone(hub2.raw, "значение EIM отброшено: уже есть 50:7A")
+        self.assertFalse(e2.takes_reports())
+
+    def test_eim_values_mute_and_settle(self):
+        e, hub, out, clock, q = self.poller('{"Volume":20}', arc_source="eim")
+        e.step()
+        self.assertEqual(out, [], "первое значение - тихая базовая точка")
+        hub.on_key("up", "remote")
+        self.assertEqual([o["reason"] for o in out], ["key"])
+        clock.advance(0.15)
+        e.step()                                          # опрос опередил саундбар: то же значение
+        self.assertEqual(len(out), 1)
+        q.answers = ['{"Volume":21}']
+        clock.advance(0.15)
+        e.step()
+        self.assertEqual((out[-1]["reason"], out[-1]["volume"], out[-1]["mute"]), ("report", 21, False))
+        clock.advance(3)
+        hub.on_key("up", "remote")                        # граница/шаг: значение не меняется
+        self.assertEqual(out[-1]["reason"], "key")
+        clock.advance(0.3)
+        e.step()
+        self.assertEqual(len(out), 3)
+        clock.advance(b.EIM_SETTLE)
+        e.step()
+        self.assertEqual(out[-1]["reason"], "repeat", "то же значение через EIM_SETTLE после нажатия")
+        hub.set_tv_state(17, True)                        # muteStatus ТВ (overlay: native нет)
+        clock.advance(3)
+        e.step()
+        self.assertEqual((out[-1]["volume"], out[-1]["mute"]), (21, True), "mute для EIM - от ТВ")
+        q.answers = ['{"Volume":150}']                    # 128 + 22: бит mute в ответе
+        hub.set_tv_state(None, False)
+        e.step()
+        self.assertEqual((out[-1]["volume"], out[-1]["mute"]), (22, True))
+        hub.forget_tv_state()
+        self.assertIsNone(hub.tv_mute)
+
+    def test_failures_make_it_unavailable(self):
+        e, hub, out, clock, q = self.poller(
+            OSError(2, "No such file or directory"),
+            '{"returnValue":false,"errorCode":-1,"errorText":"Unknown method \\"getArcVolume\\""}', arc_source="eim")
+        for _ in range(b.EIM_FAILS - 1):
+            self.assertEqual(e.step(), b.EIM_IDLE)
+        with self.assertRaises(b.Unavailable) as ctx:
+            e.step()
+        self.assertIn('getArcVolume unavailable ({"returnValue":false,"errorCode":-1,"errorText":"Unknown method',
+                      str(ctx.exception))
+        q.answers = ['{"Volume":5}']
+        e.step()
+        self.assertEqual(hub.raw, 5)
+        e2, _, _, _, _ = self.poller(subprocess.TimeoutExpired("luna-send", 1.5), arc_source="eim")
+        for _ in range(b.EIM_FAILS - 1):
+            e2.step()
+        self.assertRaisesRegex(b.Unavailable, "timed out", e2.step)
+
+    def test_line_sink_and_bus_in_eim_mode(self):
+        class Eim(object):
+            on = True
+
+            def takes_reports(self):
+                return self.on
+        rec, eim = Sink.Rec(), Eim()
+        sink = b.LineSink(rec, FakeBus(sees_reports=False), eim)
+        sink(["RX507A14", "TX054441"])
+        self.assertEqual(rec.calls, [("key", "up")], "50:7A из лога не показывается, пока значения даёт EIM")
+        eim.on = False
+        sink(["RX507A15"])
+        self.assertEqual(rec.calls[-1], ("report", 0x15))
+        # --arc-source eim: шина видит 50:7A, но в Hub его не передаёт
+        r, w = os.pipe()
+        queue = [bytes.fromhex("507A15"), bytes.fromhex("054441")]
+
+        def fake_ioctl(fd, req, buf, *a):
+            if req == b.CEC_RECEIVE:
+                if not queue:
+                    raise OSError(b.errno.EAGAIN, "empty")
+                frame = queue.pop(0)
+                buf[:] = b.CEC_MSG.pack(0, 0, len(frame), 0, 0, 0, frame, 0, 0, 0, 0, 0, 0, 0)
+                return 0
+            return 0
+        rec2 = Sink.Rec()
+        bus = b.CecBus(cfg(arc_source="eim", no_tap_file="/nonexistent", final_query=False), rec2, b.KeyState())
+        orig, b.fcntl.ioctl = b.fcntl.ioctl, fake_ioctl
+        stop = threading.Event()
+        os.write(w, b"x")
+        th = threading.Thread(target=bus.loop, args=(stop, r, None))
+        th.daemon = True
+        try:
+            th.start()
+            time.sleep(0.3)
+        finally:
+            stop.set()
+            th.join(3)
+            b.fcntl.ioctl = orig
+            os.close(r)
+            os.close(w)
+        self.assertEqual(rec2.calls, [("key", "up")])
+        self.assertTrue(bus.sees_reports)
+
+    def test_probe(self):
+        self.assertEqual(b.probe_eim(lambda: '{"Volume":11}'),
+                         ["EIM getArcVolume: Volume 11 - --arc-source auto uses it when the CEC bus brings no 50:7A"])
+        self.assertIn("Volume 3 muted", b.probe_eim(lambda: '{"Volume":131}')[0])
+        self.assertEqual(b.probe_eim(lambda: '{"returnValue":false,"errorText":"Unknown method"}'),
+                         ['EIM getArcVolume: unavailable ({"returnValue":false,"errorText":"Unknown method"})'])
+        self.assertEqual(b.probe_eim(lambda: ""), ["EIM getArcVolume: unavailable (no reply)"])
+
+        def boom():
+            raise OSError(2, "No such file or directory")
+        self.assertEqual(b.probe_eim(boom), ["EIM getArcVolume: unavailable ([Errno 2] No such file or directory)"])
+        self.assertTrue(b.short_reply("x" * 200).endswith("..."))
+
+    def test_real_query_and_thread_with_fake_luna_send(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake, calls = os.path.join(d, "luna-send"), os.path.join(d, "calls")
+            with open(fake, "w") as f:
+                f.write('#!/bin/sh\necho "$*" >> "%s"\n'
+                        '[ -c /dev/stdin ] || exit 0\n'        # как на ТВ: из канала ничего не выводит
+                        'echo \'{"Volume":33}\'\n' % calls)
+            os.chmod(fake, 0o755)
+            self.assertEqual(b.parse_arc_volume(b.eim_query(fake)), (33, None))
+            hub, out, clock = make_hub(arc_source="eim")
+            e = b.EimPoller(hub, hub.cfg, None, query=lambda: b.eim_query(fake))
+            stop = threading.Event()
+            th = threading.Thread(target=e, args=(stop,))
+            th.daemon = True
+            th.start()
+            time.sleep(0.5)
+            stop.set()
+            e.wake.set()
+            th.join(3)
+            self.assertFalse(th.is_alive())
+            self.assertEqual(hub.raw, 33)
+            self.assertFalse(e.delivering, "остановлен - лог снова источник")
+            with open(calls) as f:
+                lines = f.read().splitlines()
+        self.assertGreaterEqual(len(lines), 2)
+        self.assertEqual(lines[0], "-n 1 luna://com.webos.service.eim/getArcVolume {}")
+
+    def test_cli_flag(self):
+        ns = b.build_parser().parse_args([])
+        self.assertEqual(ns.arc_source, "auto")
+        self.assertEqual(b.build_parser().parse_args(["--arc-source", "eim"]).arc_source, "eim")
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            b.build_parser().parse_args(["--arc-source", "master"])
+
+
+class Rejected(unittest.TestCase):
+    def test_logged_once_per_text_and_interval(self):
+        with tempfile.TemporaryDirectory() as d:
+            b._LOG["path"] = os.path.join(d, "log")
+            try:
+                p = b.Publisher("com.test.app", {}, dry_run=True)
+                err = '{"returnValue":false,"errorText":"app not found"}'
+                for i in range(5):
+                    p.rejected(err, 100.0 + i)
+                p.rejected('{"returnValue":false,"errorText":"other"}', 106.0)
+                p.rejected('{"returnValue":false,"errorText":"other"}', 106.0 + b.REJECT_RELOG)
+                with open(b._LOG["path"]) as f:
+                    lines = [l.split(" ", 2)[2].strip() for l in f]
+            finally:
+                b._LOG["path"] = None
+        self.assertEqual(lines, [
+            'launch rejected: %s - is the eArcNG app (com.test.app) installed?' % err,
+            'launch rejected: {"returnValue":false,"errorText":"other"} - is the eArcNG app (com.test.app) installed? '
+            '[4 repeats not logged]',
+            'launch rejected: {"returnValue":false,"errorText":"other"} - is the eArcNG app (com.test.app) installed?'])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

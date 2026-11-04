@@ -1,6 +1,8 @@
 #!/bin/sh
 # remote-setup.sh - eArcNG: установка и управление НА ТВ (POSIX sh / BusyBox ash, root).
 #   sh remote-setup.sh install <STAGE_DIR>   установить (из распакованного архива): бэкенд + приложение eArcNG
+#   sh <APP>/backend/remote-setup.sh activate   экран настроек: поставить/обновить бэкенд из пакета приложения
+#                                               (Homebrew Channel), stdout - как status
 #   sh remote-setup.sh enable|disable|restart|status|log|uninstall
 #   sh remote-setup.sh args [FLAGS... | --clear]   показать / проверить и сохранить флаги, перезапустить
 #   sh remote-setup.sh ui [native|overlay]          нативный индикатор (QML-патч, webOS <= 10.x) или оверлей
@@ -53,12 +55,35 @@ app_version() {
 		| sed 's/.*"\([0-9.]*\)"$/\1/'
 }
 
-trk501_state() {
-	# running | enabled | none. Вместе с нашим мостом - два индикатора и двойной tap guard
+proc_find() { # PID процессов, командная строка которых (NUL -> пробел) подходит под шаблон case $1
+	# Один python3 на весь /proc: tr на каждый процесс под Homebrew Channel (экран настроек) - 3-4 с на проход
+	if command -v python3 >/dev/null 2>&1; then
+		python3 -c 'import fnmatch, os, sys
+me = str(os.getpid())
+for p in os.listdir("/proc"):
+    if p.isdigit() and p != me:
+        try:
+            with open("/proc/" + p + "/cmdline", "rb") as f:
+                c = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+        if fnmatch.fnmatchcase(c, sys.argv[1]):
+            print(p)' "$1" 2>/dev/null || true
+		return 0
+	fi
 	for d in /proc/[0-9]*; do
 		cmd=$(tr '\0' ' ' 2>/dev/null < "$d/cmdline") || continue
-		case $cmd in *"$TRK_DIR/cec-sync.py"*) echo running; return 0 ;; esac
+		# shellcheck disable=SC2254  # $1 - шаблон
+		case $cmd in $1) echo "${d#/proc/}" ;; esac
 	done
+}
+
+trk501_state() {
+	# running | enabled | none. Вместе с нашим мостом - два индикатора и двойной tap guard
+	if [ -n "$(proc_find "*$TRK_DIR/cec-sync.py*")" ]; then
+		echo running
+		return 0
+	fi
 	if [ -e "$HOOKDIR/60-volume-osd" ] && [ ! -e "$TRK_DIR/disable" ]; then
 		echo enabled
 	else
@@ -94,11 +119,8 @@ stop_stock_watcher() {
 	if [ -L "$STOCK_HOOK" ] || [ -e "$STOCK_HOOK" ]; then
 		rm -f "$STOCK_HOOK"
 	fi
-	for d in /proc/[0-9]*; do
-		cmd=$(tr '\0' ' ' 2>/dev/null < "$d/cmdline") || continue
-		case $cmd in
-			*node*earcvolume*/runtime/watcher.js*) kill "${d#/proc/}" 2>/dev/null || true ;;
-		esac
+	for pid in $(proc_find '*node*earcvolume*/runtime/watcher.js*'); do
+		kill "$pid" 2>/dev/null || true
 	done
 	rm -f "$RUNDIR/earc-volume-overlay.pid"
 }
@@ -108,16 +130,17 @@ proc_alive() { # процесс жив и не зомби (фоновый luna-s
 	[ -n "$st" ] && [ "$st" != Z ]
 }
 
-app_ready() { # $1 - каталог app/ из архива, $2 - версия: файлы на месте и applicationManager знает приложение
+app_ready() { # $1 - каталог app/ из архива, $2 - версия, $3 - backend/: файлы на месте, applicationManager знает
 	dir=$(find_app "$APP_ID") || return 1
-	python3 "$IPKPY" same "$1" "$dir" || return 1
+	python3 "$IPKPY" same "$1" "$dir" "$3" || return 1
 	luna luna://com.webos.applicationManager/getAppInfo "{\"id\":\"$APP_ID\"}" | grep -q "\"version\" *: *\"$2\""
 }
 
-install_app() { # $1 - каталог app/ из архива: собрать IPK и поставить через appInstallService (как ares-install)
+install_app() { # $1 - каталог app/, $2 - backend/ из архива: собрать IPK (бэкенд внутри) и поставить (как ares-install)
 	src=$1
+	bsrc=$2
 	rm -f "$IPK" "$INSTALL_LOG"
-	info=$(python3 "$IPKPY" build "$src" "$IPK") || die "could not build the eArcNG app package"
+	info=$(python3 "$IPKPY" build "$src" "$IPK" "$bsrc") || die "could not build the eArcNG app package"
 	ver=${info#* }
 	echo "installing the eArcNG app $ver (appInstallService, up to ${INSTALL_WAIT}s)"
 	luna-send -n 50 luna://com.webos.appInstallService/dev/install \
@@ -130,14 +153,14 @@ install_app() { # $1 - каталог app/ из архива: собрать IPK
 		n=$((n + 1))
 		if grep -qE '"errorCode"|"returnValue" *: *false' "$INSTALL_LOG"; then
 			result=failed
-		elif grep -qE '"state" *: *"installed"|"statusValue" *: *30[,}]' "$INSTALL_LOG" || app_ready "$src" "$ver"; then
+		elif grep -qE '"state" *: *"installed"|"statusValue" *: *30[,}]' "$INSTALL_LOG" || app_ready "$src" "$ver" "$bsrc"; then
 			result=ok
 		elif ! proc_alive "$lpid"; then
 			result=failed           # luna-send завершился без "installed", приложения нет
 		fi
 		if [ -n "$result" ]; then break; fi
 	done
-	if [ -z "$result" ] && find_app "$APP_ID" >/dev/null && python3 "$IPKPY" same "$src" "$(find_app "$APP_ID")"; then
+	if [ -z "$result" ] && find_app "$APP_ID" >/dev/null && python3 "$IPKPY" same "$src" "$(find_app "$APP_ID")" "$bsrc"; then
 		result=ok
 		echo "note: no confirmation from appInstallService in ${INSTALL_WAIT}s, but the app files are in place"
 	fi
@@ -173,6 +196,32 @@ restore_old_app() { # index.html eARC Volume Overlay заменён (есть in
 		rm -f "$old/overlay.js" "$old/overlay.css"
 		echo "eARC Volume Overlay ($OLD_APP_ID): stock index.html restored"
 	fi
+}
+
+install_backend() { # $1 - каталог с файлами бэкенда (backend/ архива или пакета приложения)
+	mkdir -p "$DIR" "$HOOKDIR"
+	cp "$1/cec_volume_bridge.py" "$1/remote-setup.sh" "$1/native-osd.sh" "$DIR/"
+	cp "$1/95-cec-volume-bridge" "$HOOK"
+	chmod 755 "$DIR/cec_volume_bridge.py" "$DIR/remote-setup.sh" "$DIR/native-osd.sh" "$HOOK"
+}
+
+bridge_version() { # VERSION из cec_volume_bridge.py (без запуска python)
+	sed -n 's/^VERSION = "\(.*\)"$/\1/p' "$1" 2>/dev/null | head -n 1
+}
+
+same_file() {
+	if command -v cmp >/dev/null 2>&1; then
+		cmp -s "$1" "$2"
+	else
+		python3 -c 'import sys; a, b = (open(p, "rb").read() for p in sys.argv[1:]); sys.exit(a != b)' "$1" "$2" 2>/dev/null
+	fi
+}
+
+backend_same() { # $1 - backend/ пакета приложения: установлены ровно эти файлы
+	for f in cec_volume_bridge.py remote-setup.sh native-osd.sh; do
+		same_file "$1/$f" "$DIR/$f" || return 1
+	done
+	same_file "$1/95-cec-volume-bridge" "$HOOK"
 }
 
 start_bridge() {
@@ -235,8 +284,20 @@ cmd_status() {
 	else
 		echo "qml: no (no QML compositor - webOS 11 Flutter UI?)"
 	fi
+	if [ "$state" != missing ]; then
+		echo "backend: $(bridge_version "$DIR/cec_volume_bridge.py")"
+	fi
 	if app=$(find_app "$APP_ID"); then
 		echo "app: eArcNG $(app_version "$app") ($app)"
+		# бэкенд в пакете приложения (Homebrew Channel): поставить или обновить с экрана настроек
+		if [ -f "$app/backend/cec_volume_bridge.py" ]; then
+			bver=$(bridge_version "$app/backend/cec_volume_bridge.py")
+			if [ "$state" = missing ]; then
+				echo "bundled: backend $bver in the app - Install on the settings screen"
+			elif ! backend_same "$app/backend"; then
+				echo "update: backend $bver in the app, installed $(bridge_version "$DIR/cec_volume_bridge.py") - Update on the settings screen"
+			fi
+		fi
 	else
 		echo "app: not installed"
 	fi
@@ -388,12 +449,9 @@ cmd_install() {
 		[ -n "${FORCE:-}" ] || die "trk501 lg-soundbar-volume-osd is $trk - two indicators would be shown. Disable it: touch $TRK_DIR/disable && reboot (or FORCE=1)"
 		echo "warning: trk501 is $trk (FORCE)"
 	fi
-	# сначала приложение: если appInstallService откажет, на ТВ ничего не меняется
-	install_app "$stage/app"
-	mkdir -p "$DIR" "$HOOKDIR"
-	cp "$stage/backend/cec_volume_bridge.py" "$stage/backend/remote-setup.sh" "$stage/backend/native-osd.sh" "$DIR/"
-	cp "$stage/backend/95-cec-volume-bridge" "$HOOK"
-	chmod 755 "$DIR/cec_volume_bridge.py" "$DIR/remote-setup.sh" "$DIR/native-osd.sh" "$HOOK"
+	# сначала приложение (с бэкендом внутри): если appInstallService откажет, на ТВ ничего не меняется
+	install_app "$stage/app" "$stage/backend"
+	install_backend "$stage/backend"
 	# eARC Volume Overlay не нужен: штатные файлы на месте, его watcher.js (счётчик нажатий ТВ) выключен
 	restore_old_app
 	stop_stock_watcher
@@ -405,6 +463,43 @@ cmd_install() {
 	sleep 2
 	echo "installed: backend $DIR, hook $HOOK, app $(find_app "$APP_ID")"
 	cmd_status
+}
+
+cmd_activate() {
+	# Экран настроек, приложение из Homebrew Channel: бэкенд из пакета приложения (<APP>/backend/) -> $DIR + хук.
+	# Сообщения - в stderr (stdout - status для экрана настроек), ошибка - код 1 и текст в stderr.
+	src=$(cd "$(dirname "$0")" && pwd)
+	app=$(dirname "$src")
+	if [ "${src##*/}" != backend ] || [ "${app##*/}" != "$APP_ID" ] || [ ! -f "$app/appinfo.json" ]; then
+		die "activate runs from the eArcNG app package: <app>/backend/remote-setup.sh activate"
+	fi
+	for f in cec_volume_bridge.py native-osd.sh 95-cec-volume-bridge; do
+		[ -f "$src/$f" ] || die "the app package has no $f - reinstall the eArcNG app"
+	done
+	[ "$(id -u)" = 0 ] || [ -n "${CEC_ALLOW_NONROOT:-}" ] || die "run as root"
+	command -v python3 >/dev/null 2>&1 || die "python3 not found on this TV - the backend cannot run"
+	trk=$(trk501_state)
+	if [ "$trk" != none ]; then
+		die "trk501 lg-soundbar-volume-osd is $trk - two indicators would be shown. Disable it: touch $TRK_DIR/disable && reboot"
+	fi
+	if switch_pid >/dev/null; then die "the indicator is being switched - try again in a minute"; fi
+	prev=
+	if [ -f "$DIR/cec_volume_bridge.py" ]; then prev=$(bridge_version "$DIR/cec_volume_bridge.py"); fi
+	install_backend "$src"
+	restore_old_app
+	stop_stock_watcher
+	if [ -n "$prev" ]; then
+		echo "backend updated from the app: $prev -> $(bridge_version "$DIR/cec_volume_bridge.py")"
+	else
+		echo "backend installed from the app: $(bridge_version "$DIR/cec_volume_bridge.py") ($DIR, hook $HOOK)"
+	fi
+	if [ -e "$DIR/disable" ]; then
+		echo "the bridge stays disabled (Enable on the settings screen)"
+	else
+		stop_bridge
+		start_bridge
+		sleep 2
+	fi
 }
 
 cmd_uninstall() {
@@ -429,6 +524,10 @@ cmd_uninstall() {
 
 case ${1:-status} in
 	install) cmd_install "${2:-}" ;;
+	activate)
+		cmd_activate >&2
+		cmd_status
+		;;
 	enable)
 		stop_stock_watcher
 		start_bridge
@@ -486,5 +585,5 @@ case ${1:-status} in
 		cmd_switch "$@"
 		;;
 	uninstall) cmd_uninstall ;;
-	*) die "unknown command: $1 (install|enable|disable|restart|status|log|args|ui|switch|uninstall)" ;;
+	*) die "unknown command: $1 (install|activate|enable|disable|restart|status|log|args|ui|switch|uninstall)" ;;
 esac

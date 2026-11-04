@@ -17,12 +17,20 @@ note() { echo "$(date '+%Y-%m-%d %H:%M:%S') hook: $*" >> "$LOG"; }
 [ -f "$BRIDGE" ] || exit 0
 PY=$(command -v python3 2>/dev/null) || { note "python3 not found - bridge not started"; exit 0; }
 
-# Штатный бэкенд оверлея (Node watcher.js) показывает счётчик нажатий ТВ - он не нужен
-for d in /proc/[0-9]*; do
-	cmd=$(tr '\0' ' ' 2>/dev/null < "$d/cmdline") || continue
-	case $cmd in
-		*node*earcvolume*/runtime/watcher.js*) kill "${d#/proc/}" 2>/dev/null && note "stopped stock watcher.js" ;;
-	esac
+# Штатный бэкенд оверлея (Node watcher.js) показывает счётчик нажатий ТВ - он не нужен.
+# Один python3 на весь /proc (tr на каждый процесс под Homebrew Channel - секунды)
+for pid in $("$PY" -c 'import fnmatch, os
+me = str(os.getpid())
+for p in os.listdir("/proc"):
+    if p.isdigit() and p != me:
+        try:
+            with open("/proc/" + p + "/cmdline", "rb") as f:
+                c = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+        if fnmatch.fnmatchcase(c, "*node*earcvolume*/runtime/watcher.js*"):
+            print(p)' 2>/dev/null); do
+	kill "$pid" 2>/dev/null && note "stopped stock watcher.js"
 done
 
 # Уже работает? (pid из файла жив и это наш процесс)

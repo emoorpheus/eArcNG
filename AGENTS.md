@@ -20,9 +20,11 @@ Nikolay1243/Webos-EARC-Volume-Overlay (MIT): keep their copyright lines in [LICE
 |------|---------|-------|
 | `backend/cec_volume_bridge.py` | TV, root | Python 3.6+, stdlib only; `--probe`, `--print-config`, `--replay` |
 | `backend/remote-setup.sh`, `native-osd.sh`, `95-cec-volume-bridge` | TV, root | POSIX sh for BusyBox ash, no bashisms |
-| `backend/ipk.py` | TV (install) and PC (tests) | Python 3 stdlib; builds the app IPK like `ares-package` |
+| `backend/ipk.py` | TV (install) and PC (tests) | Python 3 stdlib; builds the app IPK like `ares-package`, with `backend/` inside |
 | `app/` (`appinfo.json`, `index.html`, `overlay.js`, `overlay.css`, icons) | TV web app | ES5 (`var`, no arrow functions), no build step, no dependencies |
 | `tools/earcng.sh` | PC (macOS, Linux, WSL) | Bash 3.2+ (macOS stock bash): no `mapfile`, `${var,,}`, associative arrays |
+| `tools/make-release.py` | PC (maintainer) | Python 3.6+ stdlib; release files in `dist/` (see Release) |
+| `repo.json` | Homebrew Channel | repository: `manifestUrl` = `releases/latest/download/<id>.manifest.json`, not edited per release |
 | `tests/` | PC, CI | see below |
 
 On the TV: `/home/root/cec-volume/` (backend, `args`, `ui`), hook `/var/lib/webosbrew/init.d/95-cec-volume-bridge`,
@@ -30,18 +32,24 @@ app `/media/developer/apps/usr/palm/applications/com.github.emoorpheus.earcng`, 
 `/tmp/cec-volume-bridge.log` (+ `.err`), `/tmp/cec-volume-ui.log` (switch from the settings screen),
 `/tmp/earcng-install.log` (app install).
 
+Homebrew Channel install (1.1.0, checked on the TV with a test repository; the address from `main` not yet): the
+app package carries `backend/` (files 0644, run with `sh`); the settings screen runs
+`<app>/backend/remote-setup.sh activate` as root through Homebrew Channel. Both the PC `install` and Homebrew
+Channel install the same package (`ipk.py build <app> <out> <backend>`).
+
 ## Tests
 
 ```bash
 BUSYBOX=/path/to/busybox BASH32=/path/to/bash-3.2 REQUIRE_ALL=1 bash tests/run-all.sh
 ```
 
-* Seven suites: Python unittest (`tests/test_*.py`), `node tests/test-overlay.cjs`, `tests/test_shell.sh`
+* Seven suites: Python unittest (`tests/test_*.py`, `tests/test_release.py` needs `git`), `node tests/test-overlay.cjs`, `tests/test_shell.sh`
   (BusyBox), `tests/test_installer.sh` (ssh stub, also under Bash 3.2), shellcheck (bash and `-s sh`).
   CI (`.github/workflows/tests.yml`) runs the same with `REQUIRE_ALL=1`: a skipped suite is a failure.
 * `BUSYBOX` must be a static binary from busybox.net (1.35.0 x86_64 musl in CI). Debian/Ubuntu `busybox-static`
   prefers its own applets over `PATH` and is rejected.
-* `tests/fixtures/luna-send` is the shared `luna-send` stub (appInstallService, applicationManager, getVolume).
+* `tests/fixtures/luna-send` is the shared `luna-send` stub (appInstallService, applicationManager, getVolume,
+  `eim/getArcVolume`: `FAKE_ARC_FILE` holds the volume, without it the reply is "Unknown method").
   Like the real one, it prints nothing when stdin is a pipe.
 * The shell suites find and kill their processes with `pgrep -f` / `pkill -f`. While they run, do not start
   commands whose command line contains `cec_volume_bridge` or the suite's temp directory (self-match), and do not
@@ -53,6 +61,9 @@ BUSYBOX=/path/to/busybox BASH32=/path/to/bash-3.2 REQUIRE_ALL=1 bash tests/run-a
 
 * `luna-send` on the TV always runs with `</dev/null` (use `luna()` in `remote-setup.sh`): over ssh its stdin is
   a pipe and it prints nothing.
+* Settings screen on the TV: a focused button that gets `hidden` loses focus at once (`document.activeElement`
+  becomes `body`). Remember the focused element before hiding and move the focus after (see `renderSetup`); the
+  fake DOM in `tests/test-overlay.cjs` does the same.
 * The version is in three places and must match (tests check it): `VERSION` in `backend/cec_volume_bridge.py`,
   `version` in `app/appinfo.json`, the footer in `app/index.html`.
 * The app id `com.github.emoorpheus.earcng` is in the bridge, `remote-setup.sh`, `tools/earcng.sh` and
@@ -78,10 +89,19 @@ BUSYBOX=/path/to/busybox BASH32=/path/to/bash-3.2 REQUIRE_ALL=1 bash tests/run-a
 
 ## Release
 
+Only after the TV checks: `## [Unreleased]` in `CHANGELOG.md` becomes `## [X.Y.Z] - date`, the "Tested" part of
+`docs/release-notes/vX.Y.Z.md` is filled in from the field test.
+
 ```bash
 git tag -a vX.Y.Z -m "eArcNG X.Y.Z" && git push origin vX.Y.Z
-git archive --format=zip --prefix=earcng/ -o earcng-X.Y.Z.zip vX.Y.Z
-shasum -a 256 earcng-X.Y.Z.zip > SHA256SUMS
+python3 tools/make-release.py vX.Y.Z
 ```
 
-Attach the zip and `SHA256SUMS` to the GitHub release; the text is `docs/release-notes/vX.Y.Z.md`.
+`make-release.py` checks the three versions, CHANGELOG and release notes, builds from the tag (not the working
+tree) and writes `dist/`: `com.github.emoorpheus.earcng_X.Y.Z_all.ipk`, `com.github.emoorpheus.earcng.manifest.json`,
+`earcng-X.Y.Z.zip` (top folder `earcng-X.Y.Z/`), `SHA256SUMS`. Attach all four to the GitHub release (not a
+pre-release: `releases/latest` must point to it); the text is `docs/release-notes/vX.Y.Z.md`. Homebrew Channel
+finds the new version through `repo.json` → the latest release's manifest.
+Test build for a TV before tagging: `python3 tools/make-release.py --draft --base-url http://<PC-IP>:8000` and
+`python3 -m http.server 8000` in `dist/` (Homebrew Channel repository `http://<PC-IP>:8000/repo.json`; Homebrew
+Channel 0.7.3 on OLED65M59LA accepts it).

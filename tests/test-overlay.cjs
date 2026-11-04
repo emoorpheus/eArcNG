@@ -11,12 +11,20 @@ function classList() {
 }
 function element(id) {
   const props = {};
-  return { id, textContent: '', className: '', hidden: true, onclick: null, attrs: {}, classList: classList(), offsetWidth: 100,
+  let hidden = true;
+  return { id, textContent: '', className: '', onclick: null, attrs: {}, classList: classList(), offsetWidth: 100, kids: [],
     style: { setProperty: (k, v) => { props[k] = v; }, props },
+    get hidden() { return hidden; },
+    // как браузер ТВ (OLED65M59LA): скрытая кнопка с фокусом (или её ряд) сразу теряет фокус - activeElement = body
+    set hidden(v) {
+      hidden = !!v;
+      if (hidden && (doc.activeElement === this || this.kids.includes(doc.activeElement))) doc.activeElement = doc.body;
+    },
     setAttribute(k, v) { this.attrs[k] = String(v); }, focus() { doc.activeElement = this; } };
 }
-const SETUP_IDS = ['hero', 'status', 'ui', 'details', 'toggle', 'test', 'modes', 'modes-label', 'ui-native', 'ui-overlay'];
+const SETUP_IDS = ['hero', 'status', 'ui', 'details', 'toggle', 'test', 'update', 'modes', 'modes-label', 'ui-native', 'ui-overlay'];
 const el = Object.fromEntries(['osd', 'osd-value'].concat(SETUP_IDS).map((id) => [id, element(id)]));
+el.modes.kids = [el['modes-label'], el['ui-native'], el['ui-overlay']];
 const listeners = {};
 const doc = { body: { className: '' }, documentElement: { lang: 'en' }, hidden: false, activeElement: null,
   getElementById: (id) => el[id],
@@ -115,7 +123,7 @@ relaunch({});
 assert.equal(doc.body.className, 'setup-mode');
 assert.equal(log.types.at(-1), '_WEBOS_WINDOW_TYPE_CARD');
 assert.equal(log.regions.at(-1).width, 1920);
-assert.match(log.exec.at(-1), /remote-setup\.sh status/);
+assert.match(log.exec.at(-1), /sh "\$S" status; else echo missing; fi$/);
 assert.equal(el.status.textContent, 'Работает');
 assert.equal(el.hero.attrs['data-state'], 'ok');
 assert.equal(el.ui.textContent, 'системный индикатор', 'ui: native (QML patch active)');
@@ -205,11 +213,100 @@ advance(1199); assert.ok(cls('show'), 'ответ пришёл через 300 м
 advance(1); assert.ok(!cls('show'), 'на экране: гаснет через 1500 мс после НАЖАТИЯ, а не после ответа саундбара');
 advance(150); assert.equal(k2.lg.close, 1);
 const k6 = instance({ src: 'cec', sid: 'k6', seq: 1, volume: 36 });
-advance(1000);
+advance(1300);
 k6.relaunch({ src: 'cec', sid: 'k6', seq: 2, volume: 37, kt: wall0 + now - 1400 });
 advance(399); assert.ok(cls('show'));
 advance(1); assert.ok(!cls('show'), 'запоздавшее значение на экране видно минимум 400 мс');
 advance(150); assert.equal(k6.lg.close, 1);
+// появление не укорачивается: значение с давним нажатием через 1 с после появления - окно всё равно ttl от появления
+const k9 = instance({ src: 'cec', sid: 'k9', seq: 1, volume: 36 });
+advance(1000);
+k9.relaunch({ src: 'cec', sid: 'k9', seq: 2, volume: 37, kt: wall0 + now - 1400 });
+advance(499); assert.ok(cls('show'));
+advance(1); assert.ok(!cls('show'), 'ttl от появления (1500), а не 400 мс после запоздавшего значения');
+advance(150); assert.equal(k9.lg.close, 1);
+// холодный запуск на ТВ: окно ещё не на экране (document.hidden), а ответ саундбара (relaunch) уже пришёл.
+// Окно появляется (visibilitychange) через 0,4-1,5 с после нажатия - ttl от появления, а не от нажатия
+doc.hidden = true;
+const k7 = instance({ src: 'cec', sid: 'k7', seq: 1, volume: 40, reason: 'key', kt: wall0 + now - 100 });
+advance(200);
+k7.relaunch({ src: 'cec', sid: 'k7', seq: 2, volume: 41, reason: 'report', kt: wall0 + now - 300 });
+advance(1000);
+assert.equal(el['osd-value'].textContent, '41');
+doc.hidden = false; listeners.visibilitychange();               // окно появилось через 1,3 с после нажатия
+advance(1499); assert.ok(cls('show'), 'холодный запуск: полный ttl от появления окна, а не от нажатия');
+advance(1); assert.ok(!cls('show'));
+advance(149); assert.equal(k7.lg.close, 0);
+advance(1); assert.equal(k7.lg.close, 1);
+listeners.visibilitychange();                                   // повторное событие после скрытия - ничего не делает
+advance(5000); assert.equal(k7.lg.close, 1);
+// окно на экране: новое нажатие продлевает как обычно (ttl после нажатия)
+doc.hidden = true;
+const k10 = instance({ src: 'cec', sid: 'k10', seq: 1, volume: 40, kt: wall0 + now - 100 });
+advance(500); doc.hidden = false; listeners.visibilitychange();
+advance(1000);
+k10.relaunch({ src: 'cec', sid: 'k10', seq: 2, volume: 42, kt: wall0 + now - 200 });
+advance(1299); assert.ok(cls('show'));
+advance(1); assert.ok(!cls('show'), 'на экране: гаснет через ttl после последнего нажатия');
+advance(150); assert.equal(k10.lg.close, 1);
+// visibilitychange так и не пришёл: как раньше - ttl от показа (окно не зависает)
+doc.hidden = true;
+const k8 = instance({ src: 'cec', sid: 'k8', seq: 1, volume: 43 });
+advance(1499); assert.ok(cls('show'));
+advance(1); assert.ok(!cls('show'), 'без visibilitychange - ttl от показа');
+advance(150); assert.equal(k8.lg.close, 1);
+// холодный запуск на ТВ (OLED65M59LA): после первых кадров requestAnimationFrame пауза ~1,1 с, окно на экране
+// (LSM visible) только после неё, хотя visibilitychange пришёл сразу - ttl от первого кадра после паузы
+function instanceRaf(params) {
+  const lg = { close: 0, activate: 0 }, q = [];
+  const w = Object.assign({}, win, { close() { lg.close++; },
+    requestAnimationFrame(fn) { q.push(fn); return q.length; },
+    PalmSystem: Object.assign({}, win.PalmSystem, { launchParams: params, activate() { lg.activate++; } }) });
+  w.window = w;
+  vm.runInNewContext(code, w);
+  const frame = () => { q.splice(0).forEach((fn) => fn(now)); };
+  const frames = (n, step) => { for (let i = 0; i < n; i++) { advance(step); frame(); } };
+  return { lg, frame, frames, relaunch: (p) => { w.PalmSystem.launchParams = p; return w.webOSRelaunch(); } };
+}
+doc.hidden = true;
+const r1 = instanceRaf({ src: 'cec', sid: 'r1', seq: 1, volume: 44, reason: 'key', kt: wall0 + now - 300 });
+r1.frames(2, 16);                                               // 2 кадра, пока document.hidden
+doc.hidden = false; listeners.visibilitychange();               // +32: visibilitychange, окна на экране ещё нет
+r1.frames(1, 16);
+r1.relaunch({ src: 'cec', sid: 'r1', seq: 2, volume: 45, reason: 'report', kt: wall0 + now - 350 });
+advance(1100); r1.frame();                                      // +1148: пауза кончилась - окно на экране
+r1.frames(20, 16);                                              // +1468: кадры идут ровно
+advance(1179); assert.ok(cls('show'), 'ttl от первого кадра после паузы, а не от visibilitychange');
+advance(1); assert.ok(!cls('show'));
+advance(149); assert.equal(r1.lg.close, 0);
+advance(1); assert.equal(r1.lg.close, 1);
+// без паузы кадров: ttl от visibilitychange, как раньше
+doc.hidden = true;
+const r4 = instanceRaf({ src: 'cec', sid: 'r4', seq: 1, volume: 48 });
+r4.frames(2, 16); doc.hidden = false; listeners.visibilitychange();   // +32
+r4.frames(30, 16);                                                     // +512
+advance(1019); assert.ok(cls('show'));
+advance(1); assert.ok(!cls('show'), 'без паузы - ttl от visibilitychange');
+advance(150); assert.equal(r4.lg.close, 1);
+// пауза длиннее ttl: скрытие ждёт первого кадра (окно ещё не на экране)
+doc.hidden = true;
+const r2 = instanceRaf({ src: 'cec', sid: 'r2', seq: 1, volume: 46 });
+r2.frames(1, 16);
+doc.hidden = false; listeners.visibilitychange();               // +16
+advance(2000); assert.ok(cls('show'), 'кадров нет - окно ещё не на экране, не гаснет');
+r2.frame();                                                     // +2016: окно на экране
+r2.frames(20, 16);
+advance(1179); assert.ok(cls('show'));
+advance(1); assert.ok(!cls('show'), 'ttl от первого кадра после долгой паузы');
+advance(150); assert.equal(r2.lg.close, 1);
+// кадров нет совсем: окно не висит - скрытие не позже 3 с от запуска
+doc.hidden = true;
+const r3 = instanceRaf({ src: 'cec', sid: 'r3', seq: 1, volume: 47 });
+doc.hidden = false; listeners.visibilitychange();
+advance(2999); assert.ok(cls('show'));
+advance(101); assert.ok(!cls('show'), 'без кадров - не дольше 3 с от запуска');
+advance(150); assert.equal(r3.lg.close, 1);
+doc.hidden = false;
 for (const kt of ['x', wall0 + now + 5000, wall0 + now - 120000]) {   // мусор / из будущего / слишком старое
   const k3 = instance({ src: 'cec', sid: 'k3' + kt, seq: 1, volume: 35 });
   advance(1000);
@@ -337,7 +434,8 @@ assert.equal(el.ui.textContent, '', 'во время команды режим �
 pending(new Error('hbchannel: permission denied'));
 assert.equal(el.status.textContent, 'Error');
 assert.equal(el.hero.attrs['data-state'], 'error');
-assert.equal(el.details.textContent, 'hbchannel: permission denied', 'текст ошибки сервиса - в подробностях как есть');
+assert.equal(el.details.textContent, 'Homebrew Channel refused root access: check Root status in Homebrew Channel settings — '
+  + 'hbchannel: permission denied', 'подсказка + текст ошибки сервиса как есть');
 assert.equal(el.toggle.textContent, 'Enable');
 el.toggle.onclick(); assert.equal(el.status.textContent, 'Enabling…');
 const calls = [];
@@ -434,7 +532,7 @@ el['ui-overlay'].onclick(); assert.equal(ex.length, 1, 'после отмены 
 reply = 'switching\npython3: 3.10.4\nui: native (QML patch active)\nqml: yes\n';
 el['ui-overlay'].onclick();
 assert.equal(ex.length, 2);
-assert.equal(ex[1], 'if [ -f /home/root/cec-volume/remote-setup.sh ]; then sh /home/root/cec-volume/remote-setup.sh switch overlay; else echo missing; fi');
+assert.match(ex[1], /^if \[ -f \/home\/root\/cec-volume\/remote-setup\.sh \]; then sh \/home\/root\/cec-volume\/remote-setup\.sh switch overlay; else S=; /);
 assert.equal(el.status.textContent, 'Switching…');
 assert.equal(el.hero.attrs['data-state'], 'busy');
 assert.equal(el.details.textContent, 'The TV screen may go black for about 15 seconds, open apps will close');
@@ -443,7 +541,7 @@ assert.equal(doc.activeElement, el.toggle, 'фокус со скрытой кн�
 assert.equal(el.toggle.textContent, 'Disable'); assert.equal(el.toggle.attrs['aria-disabled'], 'true');
 el.toggle.onclick(); assert.equal(ex.length, 2, 'во время переключения переключатель не нажимается');
 advance(2999); assert.equal(ex.length, 2);
-advance(1); assert.equal(ex.length, 3, 'опрос status каждые 3 с'); assert.match(ex[2], /remote-setup\.sh status;/);
+advance(1); assert.equal(ex.length, 3, 'опрос status каждые 3 с'); assert.match(ex[2], /sh "\$S" status;/);
 assert.equal(el.status.textContent, 'Switching…');
 reply = QO;
 advance(3000); assert.equal(ex.length, 4);
@@ -540,6 +638,195 @@ lre.relaunch({});
 assert.equal(el.details.textContent, '', 'снова из списка приложений - без итога');
 lre.relaunch({ switched: 'overlay' });
 assert.equal(el.details.textContent, 'Done: the overlay is on', 'relaunch открытого экрана с итогом');
+
+// 14. Homebrew Channel: бэкенд в пакете приложения -> «Установить» / «Обновить»; понятные ошибки
+const cancelTimers = () => timers.clear();                     // таймеры прежних экранов (опрос, 15 с ожидания hbchannel)
+cancelTimers();
+const HBAPP = '/media/developer/apps/usr/palm/applications/com.github.emoorpheus.earcng';
+const MISSING_B = 'missing\npython3: 3.10.13; cec: /dev/cec0 ; args: none\nui: overlay\nqml: yes\napp: eArcNG 1.1.0 (' + HBAPP + ')\n' +
+  'bundled: backend 1.1.0 in the app - Install on the settings screen\n';
+const RUN_B = 'running\nui: overlay\nqml: yes\nbackend: 1.1.0\napp: eArcNG 1.1.0 (' + HBAPP + ')\n';
+const UPD = 'running\nui: overlay\nqml: yes\nbackend: 1.1.0\napp: eArcNG 1.1.1 (' + HBAPP + ')\n' +
+  'update: backend 1.1.1 in the app, installed 1.1.0 - Update on the settings screen\n';
+let hx = [], hcb = null, hreply = MISSING_B;
+const hexec = (cmd, cb) => { hx.push(cmd); if (hreply === null) hcb = cb; else cb(null, hreply); };
+setup({ palm: 'en-US', exec: hexec });
+assert.equal(el.status.textContent, 'Not installed');
+assert.equal(el.hero.attrs['data-state'], 'off', 'бэкенд есть в пакете - не ошибка, а «ещё не установлен»');
+assert.equal(el.toggle.textContent, 'Install');
+assert.equal(el.details.textContent, 'Press Install: the bridge is set up from the app (root via Homebrew Channel)');
+assert.equal(el.update.hidden, true); assert.equal(el.modes.hidden, true);
+hreply = null;
+el.toggle.onclick();
+assert.equal(el.status.textContent, 'Installing…'); assert.equal(el.toggle.attrs['aria-disabled'], 'true');
+assert.match(hx.at(-1), /^S=; for f in \/media\/developer\/[^;]*\/backend\/remote-setup\.sh \/media\/cryptofs\/[^;]*\/backend\/remote-setup\.sh; do .*sh "\$S" activate; else echo missing; fi$/);
+assert.doesNotMatch(hx.at(-1), /cec-volume\/remote-setup/, 'activate - только скрипт из пакета приложения');
+el.toggle.onclick(); assert.equal(hx.length, 2, 'во время установки вторая команда не запускается');
+hcb(null, RUN_B);
+assert.equal(el.status.textContent, 'Running'); assert.equal(el.toggle.textContent, 'Disable');
+assert.equal(el.details.textContent, ''); assert.equal(el.update.hidden, true); assert.equal(el.modes.hidden, false);
+hreply = MISSING_B; setup({ palm: 'ru-RU', exec: hexec });
+assert.equal(el.toggle.textContent, 'Установить');
+assert.equal(el.details.textContent, 'Нажмите «Установить»: мост поставится из приложения (root через Homebrew Channel)');
+hreply = null; el.toggle.onclick(); assert.equal(el.status.textContent, 'Установка…');
+hcb(new Error('error: trk501 lg-soundbar-volume-osd is running - two indicators would be shown. Disable it: touch /home/root/volume-osd/disable && reboot'));
+assert.equal(el.status.textContent, 'Ошибка');
+assert.equal(el.details.textContent, 'Работает trk501 lg-soundbar-volume-osd — сначала отключите его (см. README) — error: trk501 ' +
+  'lg-soundbar-volume-osd is running - two indicators would be shown. Disable it: touch /home/root/volume-osd/disable && reboot');
+assert.equal(el.toggle.textContent, 'Включить', 'после ошибки - обычная кнопка');
+hreply = 'missing\n'; el.toggle.onclick();
+assert.match(hx.at(-1), /^if \[ -f \/home\/root\/cec-volume\/remote-setup\.sh \]; then sh \S+ enable; else S=; .*sh "\$S" status; else echo missing; fi; fi$/,
+  'без установленного бэкенда - не enable, а status (из пакета)');
+
+// обновление: пакет приложения несёт другой бэкенд
+hreply = UPD; setup({ palm: 'en-US', exec: hexec });
+assert.equal(el.status.textContent, 'Running'); assert.equal(el.toggle.textContent, 'Disable');
+assert.equal(el.update.hidden, false); assert.equal(el.update.textContent, 'Update');
+assert.equal(el.update.attrs['aria-disabled'], 'false');
+assert.equal(el.details.textContent, 'The app brings backend 1.1.1 (installed 1.1.0) — press Update');
+assert.equal(el.modes.hidden, false);
+advance(30); assert.equal(doc.activeElement, el.toggle);
+assert.ok(key(39)); assert.ok(key(39)); assert.equal(doc.activeElement, el.update, 'вправо, вправо - «Обновить»');
+assert.ok(!key(39));
+assert.ok(key(40)); assert.equal(doc.activeElement, el['ui-overlay'], 'вниз - текущий режим');
+assert.ok(key(38)); assert.equal(doc.activeElement, el.test, 'вверх - та же колонка');
+assert.ok(key(39)); assert.equal(doc.activeElement, el.update);
+hreply = null; el.update.onclick();
+assert.equal(el.status.textContent, 'Updating…'); assert.equal(el.update.attrs['aria-disabled'], 'true');
+assert.match(hx.at(-1), /sh "\$S" activate; else echo missing; fi$/);
+const nUpd = hx.length;
+el.update.onclick(); assert.equal(hx.length, nUpd, 'во время обновления «Обновить» не запускает вторую команду');
+el.toggle.onclick(); assert.equal(hx.length, nUpd, 'во время обновления переключатель не запускает команду');
+assert.equal(hcb !== null, true);
+hcb(null, RUN_B);
+assert.equal(hx.length, nUpd); assert.equal(el.update.hidden, true, 'обновлено - кнопки нет');
+assert.equal(doc.activeElement, el.toggle, 'фокус со скрытой «Обновить» - на переключатель');
+assert.ok(key(39)); assert.ok(!key(39), '«Обновить» скрыта - правее «Теста» ничего');
+el.update.onclick(); assert.equal(hx.length, nUpd, 'скрытая «Обновить» не работает');
+const updates = [   // [ответ, язык, «Обновить» видна, кнопка, подробности]
+  [UPD, 'ru-RU', false, 'Отключить', 'В приложении бэкенд 1.1.1 (установлен 1.1.0) — нажмите «Обновить»'],
+  ['disabled\nui: overlay\nupdate: backend 1.1.1 in the app, installed 1.1.0 - Update on the settings screen\n', 'en-US', false, 'Enable',
+    'The app brings backend 1.1.1 (installed 1.1.0) — press Update'],
+  ['stopped\nupdate: backend 1.1.1 in the app, installed  - Update on the settings screen\n', 'en-US', false, 'Enable',
+    'The app brings backend 1.1.1 (installed ?) — press Update'],
+  [UPD + 'switch error: trk501 lg-soundbar-volume-osd is active - disable it first\n', 'en-US', false, 'Disable',
+    'trk501 lg-soundbar-volume-osd is active - disable it first'],
+  ['running\nui: overlay (system indicator disabled after a failed attempt)\nqml: yes\n' + UPD.split('\n')[5] + '\n', 'en-US', false, 'Disable',
+    'The system indicator did not start — the overlay is shown'],
+  ['missing\nupdate: backend 1.1.1 in the app, installed 1.1.0\n', 'en-US', true, 'Enable', 'Install from a PC: tools/earcng.sh'],
+  ['running\nupdate: available\n', 'en-US', true, 'Disable', ''],
+  ['switching\nui: overlay\n' + UPD.split('\n')[5] + '\n', 'en-US', true, 'Disable', 'The TV screen may go black for about 15 seconds, open apps will close'],
+];
+for (const [out, palm, hidden, toggle, details] of updates) {
+  setup({ palm, out });
+  const m = JSON.stringify(out);
+  assert.equal(el.update.hidden, hidden, m + ': «Обновить»');
+  assert.equal(el.toggle.textContent, toggle, m + ': кнопка');
+  assert.equal(el.details.textContent, details, m + ': подробности');
+}
+cancelTimers();
+
+// ошибки Homebrew Channel: подсказка + исходный текст (для issue)
+const errorCases = [   // [текст ошибки, подсказка en, подсказка ru]
+  ['Denied method call "exec" for category "/"', 'Homebrew Channel refused root access: check Root status in Homebrew Channel settings',
+    'Homebrew Channel не дал root-доступ: проверьте Root status в настройках Homebrew Channel'],
+  ['sh: can\'t create /home/root/x: Permission denied', 'Homebrew Channel refused root access: check Root status in Homebrew Channel settings', null],
+  ['root-required', 'The command did not run as root: the TV must be rooted (Homebrew Channel → Root status)',
+    'Команда выполнена не от root: нужен ТВ с root (Homebrew Channel → Root status)'],
+  ['error: run as root', 'The command did not run as root: the TV must be rooted (Homebrew Channel → Root status)', null],
+  ['Unknown method "exec" for category "/"', 'Homebrew Channel service not found: install or update Homebrew Channel',
+    'Сервис Homebrew Channel не найден: установите или обновите Homebrew Channel'],
+  ['Service does not exist: org.webosbrew.hbchannel.service.', 'Homebrew Channel service not found: install or update Homebrew Channel', null],
+  ['error: python3 not found on this TV - the backend cannot run', 'No python3 on this TV — the bridge cannot run', 'На ТВ нет python3 — мост не может работать'],
+  ['error: something else', '', ''],
+];
+for (const [msg, en, ru] of errorCases) {
+  setup({ palm: 'en-US', exec: (cmd, cb) => cb(new Error(msg)) });
+  assert.equal(el.status.textContent, 'Error', msg);
+  assert.equal(el.hero.attrs['data-state'], 'error');
+  assert.equal(el.details.textContent, en ? en + ' — ' + msg : msg, msg + ' (en)');
+  assert.equal(el.update.hidden, true); assert.equal(el.toggle.textContent, 'Enable');
+  if (ru !== null) {
+    setup({ palm: 'ru-RU', exec: (cmd, cb) => cb(new Error(msg)) });
+    assert.equal(el.details.textContent, ru ? ru + ' — ' + msg : msg, msg + ' (ru)');
+  }
+}
+// тот же путь через PalmServiceBridge (ответ hbchannel exec): stderrString важнее errorText
+for (const [reply, details] of [
+  [{ returnValue: false, errorText: 'Denied method call "exec" for category "/"' },
+    'Homebrew Channel refused root access: check Root status in Homebrew Channel settings — Denied method call "exec" for category "/"'],
+  [{ returnValue: false, errorText: 'exit 1', stderrString: 'error: run as root' },
+    'The command did not run as root: the TV must be rooted (Homebrew Channel → Root status) — error: run as root'],
+  [{ returnValue: true, stdoutString: MISSING_B }, 'Press Install: the bridge is set up from the app (root via Homebrew Channel)'],
+]) {
+  const lbr = setup({ palm: 'en-US', exec: null, bridge: true });
+  assert.equal(lbr.bridges.length, 2, 'язык + exec');
+  assert.equal(lbr.bridges[1].calls[0][0], 'luna://org.webosbrew.hbchannel.service/exec');
+  assert.match(lbr.bridges[1].calls[0][1].command, /sh "\$S" status;/);
+  lbr.bridges[1].onservicecallback(JSON.stringify(reply));
+  assert.equal(el.details.textContent, details, JSON.stringify(reply));
+}
+cancelTimers();
+// ожидание ответа hbchannel: status - 15 с, установка (activate) - 60 с (на ТВ под HB она идёт ~13 с)
+setup({ palm: 'en-US', exec: null, bridge: true });
+advance(15001);
+assert.equal(el.status.textContent, 'Error', 'status без ответа 15 с -> ошибка');
+assert.match(el.details.textContent, /did not answer/);
+cancelTimers();
+const inst = setup({ palm: 'en-US', exec: null, bridge: true });
+inst.bridges[1].onservicecallback(JSON.stringify({ returnValue: true, stdoutString: MISSING_B }));
+el.toggle.onclick();
+assert.equal(inst.bridges.length, 3, 'activate - новый вызов exec');
+assert.match(inst.bridges[2].calls[0][1].command, /sh "\$S" activate;/);
+advance(15001);
+assert.equal(el.status.textContent, 'Installing…', 'activate: 15 с - ещё ждём');
+advance(30000);
+assert.equal(el.status.textContent, 'Installing…', 'activate: 45 с - ещё ждём');
+inst.bridges[2].onservicecallback(JSON.stringify({ returnValue: true, stdoutString: RUN_B }));
+assert.equal(el.status.textContent, 'Running', 'ответ через 45 с принят');
+cancelTimers();
+const lost = setup({ palm: 'en-US', exec: null, bridge: true });
+lost.bridges[1].onservicecallback(JSON.stringify({ returnValue: true, stdoutString: MISSING_B }));
+el.toggle.onclick();
+advance(60001);
+assert.equal(el.status.textContent, 'Error', 'activate без ответа 60 с -> ошибка');
+assert.match(el.details.textContent, /did not answer/);
+cancelTimers();
+
+// команды экрана настроек в настоящем sh: какой remote-setup.sh запускается (пути - во временном каталоге)
+const { execFileSync } = require('node:child_process');
+const os = require('node:os');
+const cmds = {};
+setup({ palm: 'en-US', exec: (cmd, cb) => { cmds.status = cmd; cb(null, RUN_B); } });
+setup({ palm: 'en-US', exec: (cmd, cb) => { if (/disable/.test(cmd)) cmds.disable = cmd; cb(null, RUN_B); } });
+el.toggle.onclick();
+setup({ palm: 'en-US', exec: (cmd, cb) => { if (/activate/.test(cmd)) cmds.activate = cmd; cb(null, MISSING_B); } });
+el.toggle.onclick();
+assert.deepEqual(Object.keys(cmds).sort(), ['activate', 'disable', 'status']);
+const fake = fs.mkdtempSync(path.join(os.tmpdir(), 'earcng-ui-'));
+const runCmd = (cmd) => execFileSync('sh', ['-c', cmd.split('/home/root/').join(fake + '/home/root/').split('/media/').join(fake + '/media/')],
+  { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+const script = (dir, name) => { fs.mkdirSync(path.join(fake, dir), { recursive: true });
+  fs.writeFileSync(path.join(fake, dir, 'remote-setup.sh'), 'echo "' + name + ' $1"\n'); };
+const unscript = (dir) => fs.rmSync(path.join(fake, dir, 'remote-setup.sh'));
+const INST = 'home/root/cec-volume', DEVB = 'media/developer/apps/usr/palm/applications/com.github.emoorpheus.earcng/backend';
+const CRYB = 'media/cryptofs/apps/usr/palm/applications/com.github.emoorpheus.earcng/backend';
+try {
+  assert.deepEqual([runCmd(cmds.status), runCmd(cmds.disable), runCmd(cmds.activate)], ['missing', 'missing', 'missing'], 'ничего нет');
+  script(INST, 'installed');
+  assert.deepEqual([runCmd(cmds.status), runCmd(cmds.disable), runCmd(cmds.activate)], ['installed status', 'installed disable', 'missing'],
+    'только установленный бэкенд (как 1.0.0, без пакета)');
+  script(CRYB, 'cryptofs');
+  assert.deepEqual([runCmd(cmds.status), runCmd(cmds.disable), runCmd(cmds.activate)], ['cryptofs status', 'installed disable', 'cryptofs activate']);
+  script(DEVB, 'developer');
+  assert.deepEqual([runCmd(cmds.status), runCmd(cmds.disable), runCmd(cmds.activate)], ['developer status', 'installed disable', 'developer activate'],
+    'status/activate - из пакета приложения (developer раньше cryptofs), остальное - установленным');
+  unscript(INST);
+  assert.deepEqual([runCmd(cmds.status), runCmd(cmds.disable), runCmd(cmds.activate)], ['developer status', 'developer status', 'developer activate'],
+    'без установленного бэкенда disable/enable показывают status из пакета');
+} finally {
+  fs.rmSync(fake, { recursive: true, force: true });
+}
 
 // 13. своё приложение eArcNG: appinfo.json, значки, id везде один
 const ROOT = path.join(__dirname, '..');

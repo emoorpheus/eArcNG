@@ -13,6 +13,8 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 readonly ROOT
 readonly STAGE=/tmp/cec-volume-stage
 readonly RDIR=/home/root/cec-volume
+readonly APP_ID=com.github.emoorpheus.earcng
+readonly NO_BACKEND=3   # код выхода команды на ТВ: бэкенд не установлен (remote-setup.sh и мост так не выходят)
 
 trap 'echo "error: line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
@@ -151,6 +153,46 @@ install_from_stage() {
 	tv "FORCE='${FORCE:-}' sh '$STAGE/backend/remote-setup.sh' install '$STAGE'; rc=\$?; rm -rf '$STAGE'; exit \$rc"
 }
 
+# remote-setup.sh <действие> на ТВ. Без установленного бэкенда (например, приложение поставлено через Homebrew
+# Channel, а «Установить» на экране настроек ещё не нажато) status/log/uninstall выполняет копия из пакета
+# приложения, остальное - понятное сообщение вместо "sh: can't open .../remote-setup.sh"
+setup() {
+	local action=$1 rc=0
+	shift
+	tv "S='$RDIR/remote-setup.sh'
+if [ ! -f \"\$S\" ]; then
+	S=
+	case $action in status | log | uninstall)
+		for base in \${APP_BASES:-/media/developer/apps/usr/palm/applications /media/cryptofs/apps/usr/palm/applications}; do
+			if [ -z \"\$S\" ] && [ -f \"\$base/$APP_ID/backend/remote-setup.sh\" ]; then S=\$base/$APP_ID/backend/remote-setup.sh; fi
+		done
+	esac
+	if [ -z \"\$S\" ]; then exit $NO_BACKEND; fi
+fi
+sh \"\$S\" $action $(quote_args "$@")" || rc=$?
+	if [[ $rc -eq $NO_BACKEND ]]; then not_installed "$action"; fi
+	return "$rc"
+}
+
+not_installed() {
+	local hint="install: $0 root@<TV-IP> install, or the eArcNG app from Homebrew Channel + Install on its settings screen"
+	case $1 in
+		status)
+			echo missing
+			echo "eArcNG is not installed on this TV - $hint"
+			exit 0
+			;;
+		uninstall)
+			echo "nothing to uninstall: eArcNG is not installed on this TV"
+			exit 0
+			;;
+		*)
+			echo "error: the eArcNG backend is not installed on this TV - $hint" >&2
+			exit 1
+			;;
+	esac
+}
+
 try_dry_run() {
 	local secs=${TRY_SECONDS:-90}
 	if ! [[ $secs =~ ^[0-9]+$ ]]; then
@@ -174,13 +216,16 @@ case $MODE in
 		install_from_stage
 		echo "Done. Press volume +/- on the LG remote. Settings: open eArcNG from the app list. Log: $0 $TV log"
 		;;
-	status | log | restart | uninstall) tv "sh '$RDIR/remote-setup.sh' '$MODE'" ;;
-	args) tv "sh '$RDIR/remote-setup.sh' args $(quote_args "$@")" ;;
-	ui) tv "sh '$RDIR/remote-setup.sh' ui $(quote_args "$@")" ;;
+	status | log | restart | uninstall) setup "$MODE" ;;
+	args | ui) setup "$MODE" "$@" ;;
 	report) report ;;
 	monitor)
 		echo "Press volume keys (Ctrl+C to stop). Dry run: nothing is sent to the bus or the overlay."
-		tv_tty "python3 '$RDIR/cec_volume_bridge.py' --dry-run --debug --log-file /dev/null $(quote_args "$@")"
+		rc=0
+		tv_tty "if [ ! -f '$RDIR/cec_volume_bridge.py' ]; then exit $NO_BACKEND; fi
+python3 '$RDIR/cec_volume_bridge.py' --dry-run --debug --log-file /dev/null $(quote_args "$@")" || rc=$?
+		if [[ $rc -eq $NO_BACKEND ]]; then not_installed monitor; fi
+		exit "$rc"
 		;;
 	*) usage ;;
 esac

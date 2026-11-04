@@ -1,0 +1,17 @@
+{
+  "paging": {
+    "page": 1,
+    "count": 1,
+    "maxPage": 1,
+    "itemsTotal": 1
+  },
+  "packages": [
+    {
+      "id": "com.github.emoorpheus.earcng",
+      "title": "eArcNG",
+      "iconUri": "https://raw.githubusercontent.com/emoorpheus/earcng/main/app/largeIcon.png",
+      "manifestUrl": "https://github.com/emoorpheus/earcng/releases/latest/download/com.github.emoorpheus.earcng.manifest.json",
+      "shortDescription": "Real eARC/ARC soundbar volume on the TV screen (HDMI-CEC)."
+    }
+  ]
+}
