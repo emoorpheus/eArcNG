@@ -4,23 +4,44 @@ All notable changes to eArcNG.
 
 ## [Unreleased]
 
-Checked on one TV after the 1.1.1 release (LG OLED65M59LA, webOS 10.3.0, Homebrew Channel 0.7.3; the buttons were
-pressed with key events over SSH, not with a remote): updating from the `main` address. The package page showed
-`1.1.1 (installed: 1.1.0)`; UPDATE → "Application installed: eArcNG"; the settings screen offered Update (backend
-1.1.1 in the app, 1.1.0 installed) and after it showed the bridge running, without the hint. The bridge log: 1.1.0
-stopped, 1.1.1 started 1.2 s later, the native indicator patch stayed active, no errors; the TV did not restart.
+## [1.1.2] - 2026-11-04
 
-The system indicator picture: a screenshot on the same TV during one volume step up and back through the TV's
-audio service (the soundbar reported 1, then 0 again).
+Documentation only: the bridge and the app work as in 1.1.0. Checked on one TV (LG OLED65M59LA, webOS 10.3.0,
+Homebrew Channel 0.7.3, the soundbar on eARC; the buttons were pressed with key events over SSH, not with a remote):
+- Updating from the `main` address (after the 1.1.1 release): the package page showed `1.1.1 (installed: 1.1.0)`;
+  UPDATE → "Application installed: eArcNG"; the settings screen offered Update (backend 1.1.1 in the app, 1.1.0
+  installed) and after it showed the bridge running, without the hint. The bridge log: 1.1.0 stopped, 1.1.1
+  started 1.2 s later, the native indicator patch stayed active, no errors; the TV did not restart.
+- A fresh install from the `main` address after `uninstall`: INSTALL → "Application installed: eArcNG"; the
+  settings screen showed "Not installed" with Install; after Install the bridge log shows the start within a second
+  (no flags, the overlay: the default), a volume step showed the badge (21, then 20). System with confirmation →
+  the TV interface restarted, the screen came back with the result (the system indicator on, the patch active);
+  the volume keys then showed 21 / 20 in the system indicator.
+- The trk501 hint: with a stand-in process that has trk501's command line (`/home/root/volume-osd/cec-sync.py`;
+  trk501 itself was not installed) Install showed "Error" and the hint "trk501 lg-soundbar-volume-osd is running —
+  disable it first (see README)" with the script's text; nothing was installed. After the process was stopped the
+  button (Enable after an error) read the state again ("Not installed", Install), and Install worked.
+- Mute with `--arc-source eim`: the bridge got the mute from the TV 13–21 ms after the key, left the TV value alone,
+  the LG mute icon was shown; after unmute the value went to the system indicator again. `getArcVolume` while
+  muted returned `Volume 0` (no mute bit). In both runs the first press did nothing visible: the TV screen saver
+  was on and the press only woke the screen (TV behaviour).
+- Standby: the power key → "Active Standby" (the TV keeps running, the bridge was not restarted); woken over Wi-Fi
+  (Wake-on-LAN) 2 min later; the volume keys right after: 21 / 20 in the system indicator, no errors in the log.
+- Presses on the TV's Magic Remote (MR25GA) reached the bridge (`key up (remote)` in the debug log, the values in
+  the system indicator); seen in the logs, not watched on the screen.
+- The system indicator picture: a screenshot on the same TV during one volume step up and back through the TV's
+  audio service (the soundbar reported 1, then 0 again).
 
-Not checked on a TV yet: a fresh install from the `main` address.
+Not checked on a TV yet: `auto` when the bus works but the soundbar does not answer (it needs such a soundbar), the
+other Homebrew Channel error hints, webOS 11, other TVs and soundbars.
 
 ### Added
 - A screenshot of the system indicator from the TV (`docs/native.jpg`: the LG indicator shows the soundbar's volume
   over the settings screen) on the Homebrew Channel package page and in the README.
 
 ### Changed
-- README, AGENTS: updating from the `main` address is marked as checked.
+- README, AGENTS: updating and a fresh install from the `main` address, the trk501 hint, mute with `eim` and
+  standby are marked as checked.
 
 ## [1.1.1] - 2026-11-04
 
